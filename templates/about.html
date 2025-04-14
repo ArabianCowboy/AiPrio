@@ -1,0 +1,108 @@
+<!-- templates/about.html -->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About AiPrio</title>
+    <!-- Include Bootstrap Icons from CDN -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+    <!-- Link to your static CSS file -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <!-- Navigation -->
+    <nav class="navbar">
+      <div class="nav-left brand">
+        <a href="{{ url_for('home') }}" class="brand-logo">
+          <img src="{{ url_for('static', filename='aiprio_logo.png') }}" alt="AiPrio Logo" class="logo-img">
+        </a>
+      </div>
+      <div class="nav-links">
+        <a href="{{ url_for('home') }}">Home</a>
+        <a href="{{ url_for('about') }}">About</a>
+      </div>
+      <div class="nav-right">
+        <button class="dark-mode-toggle" onclick="toggleDarkMode()">Toggle Dark Mode</button>
+      </div>
+    </nav>
+
+    <!-- Enhanced the About page with modernized visuals -->
+    <div class="about-container">
+      <!-- Tab headers with modern design -->
+      <div class="tab-container">
+        <button class="tab-link active" onclick="openTab(event, 'arabic')">
+          <i class="bi bi-globe2"></i> العربية
+        </button>
+        <button class="tab-link" onclick="openTab(event, 'english')">
+          <i class="bi bi-globe"></i> English
+        </button>
+      </div>
+
+      <!-- Arabic Tab Content (Default) -->
+      <div id="arabic" class="tab-content active" dir="rtl" lang="ar">
+        <h2><i class="bi bi-info-circle"></i> عن AiPrio</h2>
+        <section class="card">
+          <h3><i class="bi bi-lightbulb"></i> ما هو AiPrio؟</h3>
+          <p style="text-align: justify;">
+            <strong>AiPrio</strong>  عبارة عن منصة مبتكرة مصممة لتقييم وترتيب طلبات أتمتة الذكاء الاصطناعي مع تركيز قوي على الامتثال التنظيمي والتميز التشغيلي. يتكون اسم <strong>"AiPrio"</strong> من كلمتين رئيسيتين: "AI" و"التصنيف". باستخدام رفع ملفات  بسلاسة، وتحليل مدعوم بالذكاء الاصطناعي مع تصورات مرئية للخرائط الحرارية، وقدرات تقارير ديناميكية، يمنح AiPrio المؤسسات القدرة على اتخاذ قرارات مبنية على البيانات بسرعة وكفاءة.
+          </p>
+        </section>
+
+        <section class="card">
+          <h3><i class="bi bi-person-circle"></i> عن المطور</h3>
+          <p style="text-align: justify;">
+            ادخل إلى عالم محمد فودة الغامض – هو مبدع حقيقي يجمع بين سحر الذكاء الاصطناعي والبرمجة الذكية والمعرفة بالتكنولوجيا التنظيمية. يُقال إن قدرته الفريدة على تحويل الأفكار المتطورة إلى واقع كانت الشرارة وراء إنشاء <strong>AiPrio</strong>. بفضل حسه الإبداعي وروح المغامرة، يحول التحديات إلى فرص مثيرة، مما يضمن أن يلبي AiPrio احتياجات اليوم ويتحدى المستقبل.
+          </p>
+        </section>
+
+        <section class="card">
+          <h3><i class="bi bi-award"></i> شكر خاص</h3>
+          <p style="text-align: justify;">
+            نتقدم بخالص الشكر والامتنان لفريق الذكاءالإصطناعي بالهيئة العامة للغذاء و الدواء على مساهماتهم القيّمة في وضع معايير التصنيف، حيث كان دعمهم ركيزة أساسية في تطوير الإطار المتين الذي يقوم عليه AiPrio.
+          </p>
+        </section>
+      </div>
+
+      <!-- English Tab Content -->
+      <div id="english" class="tab-content" dir="ltr" lang="en">
+        <h2><i class="bi bi-info-circle"></i> About AiPrio</h2>
+        <section class="card">
+          <h3><i class="bi bi-lightbulb"></i> What is AiPrio?</h3>
+          <p style="text-align: justify;">
+            <strong>AiPrio</strong> is an innovative platform engineered to evaluate and prioritize AI automation requests with a strong focus on regulatory compliance and operational excellence. The name "AiPrio" itself is a blend of two key terms: "<strong>AI</strong>" and "<strong>prioritization</strong>." Leveraging seamless CSV data uploads, AI-driven analysis enriched with intuitive heat map visualizations, and dynamic reporting capabilities, AiPrio empowers organizations to make informed, data-based decisions quickly and effectively.
+          </p>
+        </section>
+
+        <section class="card">
+          <h3><i class="bi bi-person-circle"></i> About The Creator</h3>
+          <p style="text-align: justify;">
+            Step into the mysterious world of Mohammed Fouda—a creative force whose mix of AI magic, clever coding, and regulatory know-how sparked the creation of <strong>AiPrio</strong>. Folks say his knack for turning cutting-edge ideas into reality is the secret behind the tool. With a playful sense of adventure and plenty of creativity, he turns challenges into exciting opportunities, ensuring that AiPrio not only meets today's needs but also dares to shape the future.
+          </p>
+        </section>
+
+        <section class="card">
+          <h3><i class="bi bi-award"></i> Special Thanks</h3>
+          <p style="text-align: justify;">
+            We extend our sincere gratitude to the SFDA AI Team for their invaluable contributions in formalizing the prioritization criteria. Their support has been instrumental in developing the robust framework that underpins AiPrio.
+          </p>
+        </section>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer-social">
+      <p>Follow me on:
+        <a href="https://www.linkedin.com/in/mohfouda" target="_blank" class="linkedin-icon">
+          <i class="bi bi-linkedin" style="font-size:1.25rem;"></i>
+        </a>
+      </p>
+    </div>
+    <footer class="footer">
+      <p>&copy; 2025 AiPrio. All rights reserved.</p>
+    </footer>
+
+    <!-- External JavaScript -->
+    <script src="{{ url_for('static', filename='main.js') }}"></script>
+  </body>
+</html>

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Single-Request Prioritization</title>
+  <!-- Include Bootstrap Icons from CDN -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+  <!-- Link to your static CSS file -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <!-- AOS CSS for entrance animations -->
+  <link rel="stylesheet" href="https://unpkg.com/aos@2.3.1/dist/aos.css"/>
+</head>
+<body>
+  <!-- Navigation -->
+  <nav class="navbar" aria-label="Main Navigation">
+    <!-- Brand Section -->
+    <div class="nav-left brand">
+      <a href="{{ url_for('home') }}" class="brand-logo" aria-label="AiPrio Home">
+        <img src="{{ url_for('static', filename='aiprio_logo.png') }}" alt="AiPrio Logo" class="logo-img">
+      </a>
+    </div>
+    <!-- Navigation Links -->
+    <div class="nav-links">
+      <a href="{{ url_for('home') }}" aria-label="Home">Home</a>
+      <a href="{{ url_for('about') }}" aria-label="About">About</a>
+    </div>
+    <!-- Right-aligned Dark Mode Toggle -->
+    <div class="nav-right">
+      <button class="dark-mode-toggle" onclick="toggleDarkMode()" aria-label="Toggle Dark Mode">Toggle Dark Mode</button>
+      <div id="toastContainer" class="toast-container" aria-live="assertive" aria-atomic="true"></div>
+    </div>
+  </nav>
+
+  <!-- Hero Section with Animated Background and Gradient Overlay -->
+  <section class="hero" data-aos="fade-up">
+    <div class="hero-overlay">
+      <h1>Welcome to AiPrio</h1>
+      <p>Your smart solution for AI-driven prioritization and decision-making.</p>
+      <a href="#uploadSection" class="btn primary">Get Started</a>
+    </div>
+  </section>
+  
+  <!-- Enhanced Step Wizard with Visual Progress Indicators -->
+  <div class="step-wizard" data-aos="fade-up">
+    <div class="step active">
+      <i class="bi bi-upload"></i>
+      <span>Upload</span>
+    </div>
+    <div class="step">
+      <i class="bi bi-list-check"></i>
+      <span>Select Request</span>
+    </div>
+    <div class="step">
+      <i class="bi bi-graph-up"></i>
+      <span>Analyze</span>
+    </div>
+    <div class="progress-bar">
+      <div class="progress" id="progress-indicator" style="width: 33%;"></div>
+    </div>
+  </div>
+  
+  <div class="container" id="uploadSection">
+    <!-- Main Content -->
+    <h2 data-aos="fade-up">AI Single-Request Prioritization</h2>
+    
+    <div class="main-content-wrapper" data-aos="fade-up">
+      <!-- Upload Section -->
+      <div class="upload-section" data-aos="fade-up">
+        <div class="upload-box">
+            <p class="upload-text">Click here or drag a file to upload</p>
+            <p class="upload-subtext">(Upload will start automatically)</p>
+            <input type="file" id="csvFile" class="upload-input" accept=".csv">
+            <div id="selectedFile" class="selected-file"></div>
+        </div>
+      </div>
+      
+      <!-- Request Selection Section -->
+      <div id="requestSelector" class="request-selector" style="display:none;" data-aos="fade-up">
+        <label for="requestDropdown">
+            <i class="bi bi-list-check"></i> 
+            Select a request to prioritize:
+        </label>
+        <select id="requestDropdown" aria-label="Request Dropdown"></select>
+        <div class="button-group">
+            <button onclick="previewSelectedRequest()" aria-label="Preview Selected Request">
+                <i class="bi bi-eye"></i> Preview
+            </button>
+            <button onclick="getSingleAnalysis()" aria-label="Get Analysis">
+                <i class="bi bi-graph-up"></i> Analyze
+            </button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Preview and Analysis Results -->
+    <div class="table-responsive" data-aos="fade-up">
+      <div id="previewResults" class="preview-results" aria-live="polite"></div>
+    </div>
+    
+    <!-- Results Section -->
+    <div id="resultsWrapper" class="results" style="page-break-inside: avoid;" data-aos="fade-up">
+      <div id="results"></div>
+      <!-- Evaluator Name Field -->
+      <div id="evaluatorField" style="display:none; margin-top:20px;">
+        <label for="reportEvaluatorName">Evaluator Name:</label>
+        <input type="text" id="reportEvaluatorName" placeholder="Enter your name" aria-label="Evaluator Name">
+        <button onclick="addEvaluatorName()" aria-label="Add Name to Report">Add Name to Report</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Spinner Overlay -->
+  <div id="spinnerOverlay" class="spinner-overlay" style="display:none;" role="alert" aria-live="assertive">
+    <div class="spinner" aria-hidden="true"></div>
+    <span id="spinnerMessage"></span>
+  </div>
+  
+  <!-- Chatbot UI -->
+  <div id="chatbot-container">
+    <div id="chatbot-header">
+        Chat with Insights
+        <!-- Action buttons in header -->
+        <div class="chatbot-header-actions">
+          <button id="chatbot-clear" onclick="clearChatHistory()" aria-label="Clear chat history">
+            <i class="bi bi-trash"></i>
+          </button>
+          <button id="chatbot-clear-cache" onclick="clearAnalysisCache()" aria-label="Clear analysis cache">
+            <i class="bi bi-arrow-repeat"></i>
+          </button>
+          <button id="chatbot-close" aria-label="Close chat">
+            <i class="bi bi-x-circle-fill"></i>
+          </button>
+        </div>
+    </div>
+    <div id="chatbot-messages"></div>
+    <div id="chatbot-input-container">
+        <input type="text" id="chatbot-input" placeholder="Type your question here..." aria-label="Chat input">
+        <button id="chatbot-send" aria-label="Send message">Send</button>
+    </div>
+  </div>
+
+  <!-- Chat Toggle Button -->
+  <button id="chatbot-toggle" aria-label="Toggle chat">
+    <i class="bi bi-chat-dots"></i>
+  </button>
+
+  <!-- Unified Footer -->
+  <footer class="footer container" data-aos="fade-up">
+    <p>&copy; 2025 AiPrio. All rights reserved.</p>
+    <p>Follow me on:
+      <a href="https://www.linkedin.com/in/mohfouda/" target="_blank" class="linkedin-icon" aria-label="LinkedIn Profile">
+        <i class="bi bi-linkedin"></i>
+      </a>
+    </p>
+  </footer>
+  
+  <!-- External Scripts -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.9.3/html2pdf.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- AOS Library -->
+  <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
+  <script>
+    AOS.init({
+      duration: 800,
+      easing: 'ease-in-out',
+      once: true
+    });
+  </script>
+  <script src="{{ url_for('static', filename='main.js') }}"></script>
+</body>
+</html>
