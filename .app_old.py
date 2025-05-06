@@ -51,23 +51,26 @@ def upload_csv():
         # Clean headers by stripping extra spaces
         df.columns = df.columns.str.strip()
 
-        # Define required columns based on the updated list.
+        # Define required columns to enrich prioritization evaluation.
         required_columns = [
-            "Title of Your Project",
-            "Directorate Submitting the Request",
-            "Briefly explain the current procedure or process you are proposing for RPA or AI",
-            "What is the main problem or bottleneck you are experiencing with this current process?",
-            "In brief, explain your RPA or AI idea to address the problem:",
-            "What type of automation are you proposing?",
-            "What is the estimated reduction in total working hours per month you expect to achieve after implementing RPA or AI?",
-            "Beyond time savings, what other benefits do you anticipate from this automation?",
-            "How will you measure the success or effectiveness of this automation? List key performance indicators (KPIs):",
-            "Is the data required for this automation readily available and accessible in a digital format?",
-            "How does this proposed automation align with the strategic goals and objectives of your Directorate and the SFDA?",
-            "Approximately how many total working hours are spent on this procedure each month?",
-            "How many employees currently work on this procedure?",
-            "How many different electronic systems are typically used during this procedure?",
-            "How many times is this procedure performed on average each month?"
+            'Title of Your Project',
+            'Directorate Submitting the Request',
+            'Briefly explain the current procedure or process you are proposing for RPA or AI',
+            'What is the main problem or bottleneck you are experiencing with this current process?',
+            'In brief, explain your RPA or AI idea to address the problem:',
+            'What type of automation are you proposing?',
+            'Beyond time savings, what other benefits do you anticipate from this automation?',
+            'Does this process directly impact product safety, approvals, or regulatory compliance timelines?',
+            'How will you measure the success or effectiveness of this automation? List key performance indicators (KPIs):',
+            'Is the data required for this automation readily available and accessible in a digital format?',
+            'How does this proposed automation align with the strategic goals and objectives of your Directorate and the SFDA?',
+            'How complex do you anticipate the integration with existing electronic systems will be?',
+            'Approximately how many total working hours are spent on this procedure each month?',
+            'How many employees currently work on this procedure?',
+            'How many different electronic systems are typically used during this procedure?',
+            'How many times is this procedure performed on average each month?',
+            'What is the estimated reduction in total working hours per month you expect to achieve after implementing RPA or AI?',
+            'Who are the key stakeholders (individuals or departments) that would be positively impacted by this automation?'
         ]
 
         # Verify required columns exist in CSV
@@ -136,7 +139,7 @@ def get_model():
                 temperature=0.2,
                 top_p=0.01,
                 top_k=2,
-                max_output_tokens=Config.MAX_OUTPUT_TOKENS # Ensure this is large enough
+                max_output_tokens=Config.MAX_OUTPUT_TOKENS
             ),
             safety_settings=[
                 {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
@@ -152,7 +155,7 @@ def get_model():
 def prioritize_single(row_index):
     """
     Generates an AI-based analysis for the selected row.
-    Uses Google Generative AI to produce a Markdown table, a conclusion, and enhancement suggestions.
+    Uses Google Generative AI to produce a Markdown table (with embedded heat map markup) and a conclusion.
     Implements caching to avoid redundant AI calls for the same row.
     """
     global df_global, analysis_cache
@@ -163,35 +166,44 @@ def prioritize_single(row_index):
     if row_index < 0 or row_index >= len(df_global):
         return jsonify({"error": "Row index out of range."}), 400
     
+    # Check if we already have this analysis cached
     if row_index in analysis_cache:
         print(f"Using cached analysis for row {row_index}")
         return jsonify(analysis_cache[row_index])
         
     try:
+        # Use .loc for better performance with a single row
         row = df_global.loc[row_index]
 
+        # Helper function to safely retrieve a column's value.
         def get_safe(key, default="N/A"):
             value = row.get(key, default) if pd.notna(row.get(key)) else default
+            # Special handling for stakeholder field
+            if key == 'Who are the key stakeholders (individuals or departments) that would be positively impacted by this automation?  ':
+                if value in ["N/A", "None", "na", "n/a"]:
+                    return ""
+                # Split comma-separated stakeholders and clean up
+                stakeholders = [s.strip() for s in str(value).split(',') if s.strip()]
+                return ', '.join(stakeholders) if stakeholders else ""
             return value
 
-        prompt = f"""You are an SFDA Pharmacist Business Analyst created by Mohammed Fouda. Your job is to evaluate an AI automation request based on the provided "Request Details".
+        prompt = f"""You are an SFDA Pharmacist Business Analyst created by Mohammed Fouda your job is evaluating an AI automation request.
 As a pharmacist within the Saudi Food and Drug Authority (SFDA), consider the impact on regulatory compliance, patient safety, and pharmaceutical quality.
 
-Your entire response MUST be structured in three distinct parts and be entirely in valid Markdown:
+Please produce your analysis as follows:
 
-**PART 1: Analysis Table**
-Output a single, valid Markdown table with columns: "Category", "Rating", "Rating %", and "Justification".
-- Ensure all analysis content for categories 1-9 (listed below) is INSIDE the table cells.
-- The table must be properly formatted Markdown.
-- For the "Rating" column, use one of: "Very High", "High", "Medium", "Low", or "Very Low".
-- For the "Rating %" column, use:
-    - 'Very High': 90%–100%
-    - 'High': 75%–89%
-    - 'Medium': 50%–74%
-    - 'Low': 25%–49%
-    - 'Very Low': 0%–24%
-- Wrap each rating text in an HTML span element with a class corresponding to the rating level in lowercase with hyphens (e.g., `<span class="rating-high">High</span>`).
-- Each row should represent one of the following categories:
+1.  Output a single, valid **Markdown table** with columns: **Category**, **Rating**, **Rating %**, and **Justification**.
+    -   Ensure all analysis content for categories 1-10 is INSIDE the table cells.
+    -   The table must be properly formatted Markdown.
+    -   For the **Rating** column, use one of: "Very High", "High", "Medium", "Low", or "Very Low".
+    -   For the **Rating %** column, use:
+        -   'Very High': 90%–100%
+        -   'High': 75%–89%
+        -   'Medium': 50%–74%
+        -   'Low': 25%–49%
+        -   'Very Low': 0%–24%
+    -   Wrap each rating text in an HTML span element with a class corresponding to the rating level in lowercase with hyphens (e.g., `<span class="rating-high">High</span>`).
+    -   Each row should represent one of the following categories.
 
     **1. Strategic Alignment**
     Provide at least 4 sentences discussing how well the request aligns with SFDA's Fourth Strategic Plan (2023-2027). Consider the following three strategic themes:
@@ -202,6 +214,7 @@ Output a single, valid Markdown table with columns: "Category", "Rating", "Ratin
        - If it aligns with 1 theme, assign a rating of **Medium** (e.g., "Medium (60%)").
        - If it aligns with 2 themes, assign a rating of **High** (e.g., "High (85%)").
        - If it aligns with all 3 themes, assign a rating of **Very High** (e.g., "Very High (95%)").
+
 
     **2. Potential Impact**
     Provide at least 4 sentences on expected benefits (efficiency, compliance, public health), including quantitative estimates if available.
@@ -214,76 +227,83 @@ Output a single, valid Markdown table with columns: "Category", "Rating", "Ratin
 
     **5. Risk & Challenges**
     Provide at least 3 sentences discussing potential risks or barriers.
-
+    *
     **6. Hours Spent each month**
      - Use numeric anchors if given (approximate if text):
-     • 1–10 => Very Low
-     • 11–20 => Low
-     • 21–30 => Medium
-     • 31–40 => High
-     • 41+ => Very High
-     Provide 3+ sentences on workload implications, ROI, etc. because the AI or RPA will reduce the number of hours needed to do the task.
+ • 1–10 => Very Low
+ • 11–20 => Low
+ • 21–30 => Medium
+ • 31–40 => High
+ • 41+ => Very High
+     Provide 3+ sentences on workload implications, ROI, etc. couse the AI or RPA will reduce the number of hours needed to do the task.
 
-    **7. Number of Employees**
-    - Use numeric anchors (approximate if text):
-     • 1–2 => Very Low
-     • 3–5 => Low
-     • 6–10 => Medium
-     • 11–15 => High
-     • 16+ => Very High
-     Provide 3+ sentences referencing workforce impact or resource availability. For example, if many employees are involved, then it is a high impact because the AI or RPA will reduce the number of employees needed to do the task.
+**7. Number of Employees**
+- Use numeric anchors (approximate if text):
+ • 1–2 => Very Low
+ • 3–5 => Low
+ • 6–10 => Medium
+ • 11–15 => High
+ • 16+ => Very High
+     Provide 3+ sentences referencing workforce impact or resource availability for example if many employees are involved then it is a high impact. couse the the AI or RPA will reduce the number of employees needed to do the task.
 
     **8. Number of Systems**
-    - Fewer systems = simpler (approximate if text):
-     • 0 => Very High (extremely simple)
-     • 1 => High
-     • 2 => Medium
-     • 3 => Low
-     • 4+ => Very Low (complex)
-     Provide 3+ sentences discussing integration complexity. The more complex the system, the more time it will take to integrate the AI or RPA.
+- Fewer systems = simpler (approximate if text):
+ • 0 => Very High (extremely simple)
+ • 1 => High
+ • 2 => Medium
+ • 3 => Low
+ • 4+ => Very Low (complex)
+     Provide 3+ sentences discussing integration complexity. cous the more complex the system the more time it will take to integrate the AI or RPA with the system.
 
-    **9. Overall Priority**
+**9. Key Stakeholders**
+- CRITICAL: Use ONLY the value from "KEY STAKEHOLDERS FOR ANALYSIS" below. Do NOT use the "Directorate".
+- Count the distinct stakeholders listed in "KEY STAKEHOLDERS FOR ANALYSIS":
+ • 0-1 => Very Low
+ • 2–3 => Low
+ • 4–5 => Medium
+ • 6–7 => High
+ • 8+ => Very High
+- In the Justification column:
+    - If stakeholders are listed: State "Key stakeholders identified: [List stakeholders from 'KEY STAKEHOLDERS FOR ANALYSIS']. Impact breadth is [Rating] based on [Number] stakeholders."
+    - If NO stakeholders are listed (field is empty): State exactly "No specific stakeholders listed in the request."
+
+    **10. Overall Priority**
     Synthesize the above points in at least 7 sentences, with explicit quantitative references.
 
-**PART 2: Conclusion**
-Immediately after the table, include a 4–5 sentence concluding paragraph under the exact Markdown heading `## Conclusion`.
-This paragraph must summarize key takeaways from the analysis and recommend next steps (e.g., pilot testing, further data validation, stakeholder consultation).
+2.  After the table, include a **4–5 sentence concluding paragraph** under the Markdown heading `## Conclusion`. This paragraph must summarize key takeaways and recommend next steps (e.g., pilot testing, data validation).
 
-**PART 3: Enhancement Suggestions**
-CRITICAL AND MANDATORY: Immediately after the Conclusion, you MUST add a new section with the exact Markdown heading `## Enhancement Suggestions`.
-Under this heading, provide 1 to 3 concise, actionable suggestions to improve or expand upon the "RPA or AI idea" described in the "Request Details".
-These suggestions should be practical and aim to add more value or address potential gaps. Consider aspects such as:
-    - Leveraging additional data sources not mentioned.
-    - Exploring complementary AI techniques (e.g., Natural Language Processing, Machine Learning for prediction, Computer Vision if applicable).
-    - Ways to mitigate identified risks or challenges.
-    - Ideas for improving user experience or the integration of the proposed solution.
-    - Expanding the scope of the automation to cover related tasks.
-Each suggestion should be clearly explained in 1-2 sentences.
+3.  The entire response, including the table and the conclusion, must be valid Markdown.
 
 ----
 **Request Details:**
-Title of Your Project: {get_safe('Title of Your Project')}
-Directorate Submitting the Request: {get_safe('Directorate Submitting the Request')}
-Briefly explain the current procedure or process you are proposing for RPA or AI: {get_safe('Briefly explain the current procedure or process you are proposing for RPA or AI')}
-What is the main problem or bottleneck you are experiencing with this current process?: {get_safe('What is the main problem or bottleneck you are experiencing with this current process?')}
-In brief, explain your RPA or AI idea to address the problem:: {get_safe('In brief, explain your RPA or AI idea to address the problem:')}
-What type of automation are you proposing?: {get_safe('What type of automation are you proposing?')}
-What is the estimated reduction in total working hours per month you expect to achieve after implementing RPA or AI?: {get_safe('What is the estimated reduction in total working hours per month you expect to achieve after implementing RPA or AI?')}
-Beyond time savings, what other benefits do you anticipate from this automation?: {get_safe('Beyond time savings, what other benefits do you anticipate from this automation?')}
-How will you measure the success or effectiveness of this automation? List key performance indicators (KPIs):: {get_safe('How will you measure the success or effectiveness of this automation? List key performance indicators (KPIs):')}
-Is the data required for this automation readily available and accessible in a digital format?: {get_safe('Is the data required for this automation readily available and accessible in a digital format?')}
-How does this proposed automation align with the strategic goals and objectives of your Directorate and the SFDA?: {get_safe('How does this proposed automation align with the strategic goals and objectives of your Directorate and the SFDA?')}
-Approximately how many total working hours are spent on this procedure each month?: {get_safe('Approximately how many total working hours are spent on this procedure each month?')}
-How many employees currently work on this procedure?: {get_safe('How many employees currently work on this procedure?')}
-How many different electronic systems are typically used during this procedure?: {get_safe('How many different electronic systems are typically used during this procedure?')}
-How many times is this procedure performed on average each month?: {get_safe('How many times is this procedure performed on average each month?')}
+Title: {get_safe('Title of Your Project')}
+Directorate: {get_safe('Directorate Submitting the Request')} (NOTE: This is NOT the stakeholder list)
+Procedure Description: {get_safe('Briefly explain the current procedure or process you are proposing for RPA or AI')}
+Main Problem: {get_safe('What is the main problem or bottleneck you are experiencing with this current process?')}
+Automation Proposal: {get_safe('In brief, explain your RPA or AI idea to address the problem:')}
+Automation Type: {get_safe('What type of automation are you proposing?')}
+Estimated Reduction in Working Hours: {get_safe('What is the estimated reduction in total working hours per month you expect to achieve after implementing RPA or AI?')}
+Additional Benefits: {get_safe('Beyond time savings, what other benefits do you anticipate from this automation?')}
+KPIs: {get_safe('How will you measure the success or effectiveness of this automation? List key performance indicators (KPIs):')}
+Data Readiness: {get_safe('Is the data required for this automation readily available and accessible in a digital format?')}
+Strategic Alignment: {get_safe('How does this proposed automation align with the strategic goals and objectives of your Directorate and the SFDA?')}
+Integration Complexity: {get_safe('How complex do you anticipate the integration with existing electronic systems will be?')}
+Working Hours: {get_safe('Approximately how many total working hours are spent on this procedure each month?')}
+Employee Count: {get_safe('How many employees currently work on this procedure?')}
+System Count: {get_safe('How many different electronic systems are typically used during this procedure?')}
+Procedure Frequency: {get_safe('How many times is this procedure performed on average each month?')}
+KEY STAKEHOLDERS FOR ANALYSIS: {get_safe('Who are the key stakeholders (individuals or departments) that would be positively impacted by this automation?  ')} (Use THIS value for stakeholder analysis)
 """
 
+        # Use the singleton model instance instead of creating a new one each time
         model = get_model()
+        
+        # Generate content with the model
         response = model.generate_content(prompt)
 
         try:
             analysis_text = response.text.strip()
+            # Remove potential markdown code block fences added by the model
             if analysis_text.startswith("```markdown"):
                 analysis_text = analysis_text[len("```markdown"):].strip()
             if analysis_text.endswith("```"):
@@ -298,8 +318,11 @@ How many times is this procedure performed on average each month?: {get_safe('Ho
             "directorate": get_safe('Directorate Submitting the Request'),
             "analysis": analysis_text
         }
+
+        # Store the most recent analysis in the app context (deprecated in multi-user approach)
+        app.recent_analysis = analysis_text
         
-        app.recent_analysis = analysis_text # For chat context, if still used
+        # Cache the result for future requests
         analysis_cache[row_index] = result_data
         
         return jsonify(result_data)
@@ -322,34 +345,32 @@ def chat():
     """
     data = request.get_json()
     user_query = data.get('query', '').strip()
-    frontend_analysis = data.get('analysis', '').strip() # Analysis from frontend
+    frontend_analysis = data.get('analysis', '').strip()
 
     if not user_query:
         return jsonify({"error": "Query cannot be empty."}), 400
 
     try:
-        # Use frontend_analysis if available, otherwise use app.recent_analysis as a fallback
-        # or indicate no analysis is available.
         if frontend_analysis:
-            context = f"The user is asking about the following analysis:\n{frontend_analysis}"
-        elif hasattr(app, 'recent_analysis') and app.recent_analysis:
-             context = f"The user is asking about the following analysis:\n{app.recent_analysis}"
+            context = f"The analysis results are available. Here is the most recent analysis: {frontend_analysis}"
         else:
-            context = "No specific analysis has been performed or provided yet."
+            context = "There are currently no analysis results to explain because no analysis was provided."
 
         prompt = f"""
-        You are an AI assistant helping users understand analysis results related to RPA and AI project proposals at SFDA.
-        Context:
+        You are an AI assistant helping users understand analysis results. Here is the context:
         {context}
 
         User Query: {user_query}
 
-        Provide a clear, concise, and helpful response to the user's query based on the provided analysis context.
-        If the query is general or the context is insufficient, provide a general helpful response.
+        Provide a clear and concise response to the user's query.
         """
 
+        # Use the singleton model instance instead of creating a new one each time
         model = get_model()
+        
+        # Generate content with the model
         response = model.generate_content(prompt)
+
         chatbot_response = response.text.strip()
         return jsonify({"response": chatbot_response})
 
@@ -362,20 +383,16 @@ def chat():
 @timing_decorator
 def clear_chat_history():
     """
-    Endpoint to clear the df_global (simulating chat history tied to CSV data).
-    Also clears recent_analysis.
+    Endpoint to clear the chat history.
     """
     global df_global
     try:
         df_global = None
-        if hasattr(app, 'recent_analysis'):
-            app.recent_analysis = None
-        print("Cleared df_global and app.recent_analysis.")
-        return jsonify({"message": "CSV data and recent analysis context cleared successfully."}), 200
+        return jsonify({"message": "Chat history cleared successfully."}), 200
     except Exception as e:
-        print(f"Error clearing chat history context: {e}")
+        print(f"Error clearing chat history: {e}")
         traceback.print_exc()
-        return jsonify({"error": f"Failed to clear chat history context: {e}"}), 500
+        return jsonify({"error": f"Failed to clear chat history: {e}"}), 500
 
 @app.route('/analysis/clear', methods=['POST'])
 @timing_decorator
@@ -415,7 +432,7 @@ def send_report():
         send_email(
             recipient=email,
             subject="AiPrio Analysis Report",
-            body="Please find attached your AiPrio analysis report.", # Slightly more specific body
+            body="Please find attached your analysis report",
             pdf=pdf_base64
         )
         return jsonify({"message": "PDF report sent successfully"}), 200
@@ -428,5 +445,5 @@ if __name__ == '__main__':
     app.run(
         debug=app.config["FLASK_DEBUG"],
         host=app.config["FLASK_HOST"],
-        port=5000
+        port=5000  # Fixed port for OAuth compatibility
     )

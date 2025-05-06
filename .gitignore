@@ -56,3 +56,4 @@ token.*
 *.swp
 *~
 *.old
+.qodo
