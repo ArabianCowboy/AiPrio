@@ -1,25 +1,56 @@
 // main.js
 
-// Retrieve and apply saved theme on page load
-document.addEventListener("DOMContentLoaded", () => {
-    const currentTheme = localStorage.getItem("theme") || "light";
-    if (currentTheme === "dark") {
-        document.body.classList.add("dark-mode");
+// Tab switching functionality
+function openTab(evt, tabName) {
+    // Hide all tab content
+    const tabContents = document.getElementsByClassName("tab-content");
+    for (let i = 0; i < tabContents.length; i++) {
+        tabContents[i].classList.remove("active");
     }
-  
-    // Initialize chatbot elements using the ones defined in HTML
+
+    // Deactivate all tab links
+    const tabLinks = document.getElementsByClassName("tab-link");
+    for (let i = 0; i < tabLinks.length; i++) {
+        tabLinks[i].classList.remove("active");
+    }
+
+    // Show selected tab and activate link
+    document.getElementById(tabName).classList.add("active");
+    evt.currentTarget.classList.add("active");
+}
+
+// Combined DOMContentLoaded handler for all page initialization
+document.addEventListener("DOMContentLoaded", () => {
+    // Initialize tabs on about page
+    if (document.querySelector('.tab-container')) {
+        // Set Arabic as default active tab
+        document.getElementById('arabic').classList.add('active');
+        document.querySelector('[onclick*="arabic"]').classList.add('active');
+    }
+    // Theme initialization
+    const currentTheme = localStorage.getItem("theme") || "light";
+    const isDarkMode = currentTheme === "dark";
+    document.body.classList.toggle("dark-mode", isDarkMode);
+
+    // Chatbot initialization
     const chatbotContainer = document.getElementById('chatbot-container');
     const chatbotToggle = document.getElementById('chatbot-toggle');
     const chatbotClose = document.getElementById('chatbot-close');
     const chatbotMessages = document.getElementById('chatbot-messages');
     const chatbotInput = document.getElementById('chatbot-input');
     const chatbotSend = document.getElementById('chatbot-send');
-  
+    
+    // Apply theme classes to chatbot toggle
+    if (chatbotToggle) {
+        chatbotToggle.classList.toggle('dark-mode', isDarkMode);
+        chatbotToggle.classList.toggle('light-mode', !isDarkMode);
+    }
+
     // Set initial chatbot state
     chatbotContainer.style.display = 'none';
     chatbotContainer.style.right = window.innerWidth <= 480 ? '-100%' : '-280px';
     chatbotToggle.style.display = 'flex';
-  
+
     // Chat toggle button: open the chat window
     chatbotToggle.addEventListener('click', () => {
         const isMobile = window.innerWidth <= 480;
@@ -28,7 +59,7 @@ document.addEventListener("DOMContentLoaded", () => {
         chatbotContainer.style.right = isMobile ? '0' : '20px';
         chatbotToggle.style.display = 'none';
     });
-  
+
     // Chat close button: close the chat window
     chatbotClose.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -40,13 +71,47 @@ document.addEventListener("DOMContentLoaded", () => {
             chatbotToggle.style.display = 'flex';
         }, 300);
     });
-  
-    // Load chat history and adjust layout
+
+    // Message handling
+    chatbotSend.addEventListener('click', async () => {
+        const userQuery = chatbotInput.value.trim();
+        if (!userQuery) return;
+        appendMessage('user', userQuery);
+        chatbotInput.value = '';
+
+        const latestAnalysis = localStorage.getItem("latestAnalysis") || "";
+        showTypingIndicator();
+        try {
+            const response = await fetch('/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ query: userQuery, analysis: latestAnalysis }),
+            });
+            removeTypingIndicator();
+            if (!response.ok) throw new Error('Failed to fetch chatbot response');
+            
+            const data = await response.json();
+            appendMessage('bot', data.response || 'Sorry, I could not understand your question.');
+        } catch (error) {
+            console.error('Error:', error);
+            removeTypingIndicator();
+            appendMessage('bot', 'An error occurred while processing your request.');
+        }
+    });
+
+    // Allow pressing Enter to send a message
+    chatbotInput.addEventListener('keypress', (event) => {
+        if (event.key === 'Enter') chatbotSend.click();
+    });
+
+    // Shared initialization logic
     loadChatHistory();
     adjustChatbotSize();
     adjustTableLayout();
 });
-  
+
 // Dark Mode Toggle Function with Persistence
 function toggleDarkMode() {
     const body = document.body;
@@ -61,15 +126,9 @@ function toggleDarkMode() {
         chatbotContainer.classList.toggle('dark-mode');
     }
     if (chatbotToggle) {
-        if (isDarkMode) {
-            chatbotToggle.style.backgroundColor = '#415A77';
-            chatbotToggle.style.color = '#E0E1DD';
-            chatbotToggle.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.4)';
-        } else {
-            chatbotToggle.style.backgroundColor = '#D4A373';
-            chatbotToggle.style.color = '#1B263B';
-            chatbotToggle.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.2)';
-        }
+        // Use CSS classes instead of inline styles for theme consistency
+        chatbotToggle.classList.toggle('dark-mode', isDarkMode);
+        chatbotToggle.classList.toggle('light-mode', !isDarkMode);
     }
 }
   
@@ -533,54 +592,6 @@ function removeTypingIndicator() {
     const typingIndicator = document.getElementById('typing-indicator');
     if (typingIndicator) typingIndicator.remove();
 }
-  
-// Attach event listener for sending chat messages (send button)
-document.addEventListener('DOMContentLoaded', () => {
-    const chatbotInput = document.getElementById('chatbot-input');
-    const chatbotSend = document.getElementById('chatbot-send');
-  
-    chatbotSend.addEventListener('click', async () => {
-        const userQuery = chatbotInput.value.trim();
-        if (!userQuery) return;
-        appendMessage('user', userQuery);
-        chatbotInput.value = '';
-  
-        // Retrieve the latest analysis from LocalStorage to include in the request
-        const latestAnalysis = localStorage.getItem("latestAnalysis") || "";
-  
-        showTypingIndicator();
-        try {
-            const response = await fetch('/chat', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ query: userQuery, analysis: latestAnalysis }),
-            });
-            removeTypingIndicator();
-            if (!response.ok) {
-                throw new Error('Failed to fetch chatbot response');
-            }
-            const data = await response.json();
-            if (data.response) {
-                appendMessage('bot', data.response);
-            } else {
-                appendMessage('bot', 'Sorry, I could not understand your question.');
-            }
-        } catch (error) {
-            console.error('Error:', error);
-            removeTypingIndicator();
-            appendMessage('bot', 'An error occurred while processing your request.');
-        }
-    });
-  
-    // Allow pressing Enter to send a message
-    chatbotInput.addEventListener('keypress', (event) => {
-        if (event.key === 'Enter') {
-            chatbotSend.click();
-        }
-    });
-});
   
 // Resize event listener for adjustments
 window.addEventListener('resize', debounce(() => {
