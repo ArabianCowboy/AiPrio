@@ -843,9 +843,19 @@ body.dark-mode #chatbot-clear:active {
   transition: all 0.3s ease;
 }
 
+/* Light mode specific styles for chatbot toggle */
+#chatbot-toggle.light-mode {
+  background-color: var(--primary-accent);
+  color: var(--primary-text);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* Dark mode specific styles for chatbot toggle */
+#chatbot-toggle.dark-mode, 
 body.dark-mode #chatbot-toggle {
   background-color: var(--dark-accent);
   color: var(--dark-text);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
 }
 
 /* Enhanced drag-and-drop file upload area */
