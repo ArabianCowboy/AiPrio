@@ -51,24 +51,28 @@ def upload_csv():
         # Clean headers by stripping extra spaces
         df.columns = df.columns.str.strip()
 
-        # Define required columns based on the updated list.
+        # Define required columns to enrich prioritization evaluation.
+        # This list now reflects the columns expected after the user's modification
         required_columns = [
-            "Title of Your Project",
-            "Directorate Submitting the Request",
-            "Briefly explain the current procedure or process you are proposing for RPA or AI",
-            "What is the main problem or bottleneck you are experiencing with this current process?",
-            "In brief, explain your RPA or AI idea to address the problem:",
-            "What type of automation are you proposing?",
-            "What is the estimated reduction in total working hours per month you expect to achieve after implementing RPA or AI?",
-            "Beyond time savings, what other benefits do you anticipate from this automation?",
-            "How will you measure the success or effectiveness of this automation? List key performance indicators (KPIs):",
-            "Is the data required for this automation readily available and accessible in a digital format?",
-            "How does this proposed automation align with the strategic goals and objectives of your Directorate and the SFDA?",
-            "Approximately how many total working hours are spent on this procedure each month?",
-            "How many employees currently work on this procedure?",
-            "How many different electronic systems are typically used during this procedure?",
-            "How many times is this procedure performed on average each month?"
+            'Title of Your Project',
+            'Directorate Submitting the Request',
+            'Briefly explain the current procedure or process you are proposing for RPA or AI',
+            'What is the main problem or bottleneck you are experiencing with this current process?',
+            'In brief, explain your RPA or AI idea to address the problem:',
+            'What type of automation are you proposing?',
+            'Beyond time savings, what other benefits do you anticipate from this automation?',
+            'Does this process directly impact product safety, approvals, or regulatory compliance timelines?',
+            'How will you measure the success or effectiveness of this automation? List key performance indicators (KPIs):',
+            'Is the data required for this automation readily available and accessible in a digital format?',
+            'How does this proposed automation align with the strategic goals and objectives of your Directorate and the SFDA?',
+            # 'How complex do you anticipate the integration with existing electronic systems will be?', # This column is intentionally removed from requirements
+            'Approximately how many total working hours are spent on this procedure each month?',
+            'How many employees currently work on this procedure?',
+            'How many different electronic systems are typically used during this procedure?',
+            'How many times is this procedure performed on average each month?',
+            'What is the estimated reduction in total working hours per month you expect to achieve after implementing RPA or AI?'
         ]
+
 
         # Verify required columns exist in CSV
         missing_cols = [col for col in required_columns if col not in df.columns]
@@ -133,10 +137,10 @@ def get_model():
         model_instance = genai.GenerativeModel(
             Config.GENAI_MODEL_NAME,
             generation_config=genai.types.GenerationConfig(
-                temperature=0.2,
+                temperature=0.9,
                 top_p=0.01,
                 top_k=2,
-                max_output_tokens=Config.MAX_OUTPUT_TOKENS # Ensure this is large enough
+                max_output_tokens=Config.MAX_OUTPUT_TOKENS
             ),
             safety_settings=[
                 {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
@@ -152,7 +156,7 @@ def get_model():
 def prioritize_single(row_index):
     """
     Generates an AI-based analysis for the selected row.
-    Uses Google Generative AI to produce a Markdown table, a conclusion, and enhancement suggestions.
+    Uses Google Generative AI to produce a Markdown table (with embedded heat map markup) and a conclusion.
     Implements caching to avoid redundant AI calls for the same row.
     """
     global df_global, analysis_cache
@@ -162,36 +166,40 @@ def prioritize_single(row_index):
         return jsonify({"error": "Uploaded data is not in the expected format."}), 400
     if row_index < 0 or row_index >= len(df_global):
         return jsonify({"error": "Row index out of range."}), 400
-    
+
+    # Check if we already have this analysis cached
     if row_index in analysis_cache:
         print(f"Using cached analysis for row {row_index}")
         return jsonify(analysis_cache[row_index])
-        
+
     try:
+        # Use .loc for better performance with a single row
         row = df_global.loc[row_index]
 
+        # Helper function to safely retrieve a column's value.
         def get_safe(key, default="N/A"):
-            value = row.get(key, default) if pd.notna(row.get(key)) else default
-            return value
+            # Check if the key exists in the row before accessing it
+            if key in row and pd.notna(row.loc[key]):
+                 return row.loc[key]
+            return default
 
-        prompt = f"""You are an SFDA Pharmacist Business Analyst created by Mohammed Fouda. Your job is to evaluate an AI automation request based on the provided "Request Details".
+        # Reconstructed prompt with the "Enhancement Suggestions" section restored
+        prompt = f"""You are an SFDA Pharmacist Business Analyst created by Mohammed Fouda your job is evaluating an AI automation request.
 As a pharmacist within the Saudi Food and Drug Authority (SFDA), consider the impact on regulatory compliance, patient safety, and pharmaceutical quality.
 
-Your entire response MUST be structured in three distinct parts and be entirely in valid Markdown:
+Please produce your analysis as follows:
 
-**PART 1: Analysis Table**
-Output a single, valid Markdown table with columns: "Category", "Rating", "Rating %", and "Justification".
-- Ensure all analysis content for categories 1-9 (listed below) is INSIDE the table cells.
-- The table must be properly formatted Markdown.
-- For the "Rating" column, use one of: "Very High", "High", "Medium", "Low", or "Very Low".
-- For the "Rating %" column, use:
-    - 'Very High': 90%–100%
-    - 'High': 75%–89%
-    - 'Medium': 50%–74%
-    - 'Low': 25%–49%
-    - 'Very Low': 0%–24%
-- Wrap each rating text in an HTML span element with a class corresponding to the rating level in lowercase with hyphens (e.g., `<span class="rating-high">High</span>`).
-- Each row should represent one of the following categories:
+1. A single **Markdown table** with columns: **Category**, **Rating**,, **Rating %** and **Justification**.
+    For the **Rating** column, please use one of the following values: "Very High", "High", "Medium", "Low", or "Very Low".
+    For the **Rating %** column, use the following values objuctively based on the rating:
+    - For 'Very High', select a specific percentage between 90% and 100% (e.g., 95%).
+    - For 'High', select a specific percentage between 75% and 89% (e.g., 85%).
+    - For 'Medium', select a specific percentage between 50% and 74% (e.g., 65%).
+    - For 'Low', select a specific percentage between 25% and 49% (e.g., 35%).
+    - For 'Very Low', select a specific percentage between 0% and 24% (e.g., 15%).
+    Crucially, wrap each rating text in an HTML span element with a class corresponding to the rating level in lowercase with hyphens.
+    For example, if the rating is High, output: <span class="rating-high">High</span>.
+    Each row should represent one of the following categories:
 
     **1. Strategic Alignment**
     Provide at least 4 sentences discussing how well the request aligns with SFDA's Fourth Strategic Plan (2023-2027). Consider the following three strategic themes:
@@ -202,6 +210,7 @@ Output a single, valid Markdown table with columns: "Category", "Rating", "Ratin
        - If it aligns with 1 theme, assign a rating of **Medium** (e.g., "Medium (60%)").
        - If it aligns with 2 themes, assign a rating of **High** (e.g., "High (85%)").
        - If it aligns with all 3 themes, assign a rating of **Very High** (e.g., "Very High (95%)").
+
 
     **2. Potential Impact**
     Provide at least 4 sentences on expected benefits (efficiency, compliance, public health), including quantitative estimates if available.
@@ -217,32 +226,41 @@ Output a single, valid Markdown table with columns: "Category", "Rating", "Ratin
 
     **6. Hours Spent each month**
      - Use numeric anchors if given (approximate if text):
-     • 1–10 => Very Low
-     • 11–20 => Low
-     • 21–30 => Medium
-     • 31–40 => High
-     • 41+ => Very High
-     Provide 3+ sentences on workload implications, ROI, etc. because the AI or RPA will reduce the number of hours needed to do the task.
+ • 1–10 => Very Low
+ • 11–20 => Low
+ • 21–30 => Medium
+ • 31–40 => High
+ • 41+ => Very High
+     Provide 3+ sentences on workload implications, ROI, etc. couse the AI or RPA will reduce the number of hours needed to do the task.
 
     **7. Number of Employees**
-    - Use numeric anchors (approximate if text):
-     • 1–2 => Very Low
-     • 3–5 => Low
-     • 6–10 => Medium
-     • 11–15 => High
-     • 16+ => Very High
-     Provide 3+ sentences referencing workforce impact or resource availability. For example, if many employees are involved, then it is a high impact because the AI or RPA will reduce the number of employees needed to do the task.
+- Use numeric anchors (approximate if text):
+ • 1–2 => Very Low
+ • 3–5 => Low
+ • 6–10 => Medium
+ • 11–15 => High
+ • 16+ => Very High
+     Provide 3+ sentences referencing workforce impact or resource availability for example if many employees are involved then it is a high impact. couse the the AI or RPA will reduce the number of employees needed to do the task.
 
     **8. Number of Systems**
-    - Fewer systems = simpler (approximate if text):
-     • 0 => Very High (extremely simple)
-     • 1 => High
-     • 2 => Medium
-     • 3 => Low
-     • 4+ => Very Low (complex)
-     Provide 3+ sentences discussing integration complexity. The more complex the system, the more time it will take to integrate the AI or RPA.
+- Fewer systems = simpler (approximate if text):
+ • 0 => Very High (extremely simple)
+ • 1 => High
+ • 2 => Medium
+ • 3 => Low
+ • 4+ => Very Low (complex)
+     Provide 3+ sentences discussing integration complexity. cous the more complex the system the more time it will take to integrate the AI or RPA with the system.
 
-    **9. Overall Priority**
+    **9. Stakeholders Impacted**
+- Use numeric anchors (approximate if text):
+ • 1 => Very Low
+ • 2–3 => Low
+ • 4–5 => Medium
+ • 6–7 => High
+ • 8+ => Very High
+Provide 3+ sentences explaining who is involved, potential collaboration, or cross-department benefits. for example more department get benfit from th AI or RPA the greater the the impact of reducing workload .
+
+    **10. Overall Priority**
     Synthesize the above points in at least 7 sentences, with explicit quantitative references.
 
 **PART 2: Conclusion**
@@ -262,32 +280,31 @@ Each suggestion should be clearly explained in 1-2 sentences.
 
 ----
 **Request Details:**
-Title of Your Project: {get_safe('Title of Your Project')}
-Directorate Submitting the Request: {get_safe('Directorate Submitting the Request')}
-Briefly explain the current procedure or process you are proposing for RPA or AI: {get_safe('Briefly explain the current procedure or process you are proposing for RPA or AI')}
-What is the main problem or bottleneck you are experiencing with this current process?: {get_safe('What is the main problem or bottleneck you are experiencing with this current process?')}
-In brief, explain your RPA or AI idea to address the problem:: {get_safe('In brief, explain your RPA or AI idea to address the problem:')}
-What type of automation are you proposing?: {get_safe('What type of automation are you proposing?')}
-What is the estimated reduction in total working hours per month you expect to achieve after implementing RPA or AI?: {get_safe('What is the estimated reduction in total working hours per month you expect to achieve after implementing RPA or AI?')}
-Beyond time savings, what other benefits do you anticipate from this automation?: {get_safe('Beyond time savings, what other benefits do you anticipate from this automation?')}
-How will you measure the success or effectiveness of this automation? List key performance indicators (KPIs):: {get_safe('How will you measure the success or effectiveness of this automation? List key performance indicators (KPIs):')}
-Is the data required for this automation readily available and accessible in a digital format?: {get_safe('Is the data required for this automation readily available and accessible in a digital format?')}
-How does this proposed automation align with the strategic goals and objectives of your Directorate and the SFDA?: {get_safe('How does this proposed automation align with the strategic goals and objectives of your Directorate and the SFDA?')}
-Approximately how many total working hours are spent on this procedure each month?: {get_safe('Approximately how many total working hours are spent on this procedure each month?')}
-How many employees currently work on this procedure?: {get_safe('How many employees currently work on this procedure?')}
-How many different electronic systems are typically used during this procedure?: {get_safe('How many different electronic systems are typically used during this procedure?')}
-How many times is this procedure performed on average each month?: {get_safe('How many times is this procedure performed on average each month?')}
+Title: {get_safe('Title of Your Project')}
+Directorate: {get_safe('Directorate Submitting the Request')}
+Procedure Description: {get_safe('Briefly explain the current procedure or process you are proposing for RPA or AI')}
+Main Problem: {get_safe('What is the main problem or bottleneck you are experiencing with this current process?')}
+Automation Proposal: {get_safe('In brief, explain your RPA or AI idea to address the problem:')}
+Automation Type: {get_safe('What type of automation are you proposing?')}
+Estimated Reduction in Working Hours: {get_safe('What is the estimated reduction in total working hours per month you expect to achieve after implementing RPA or AI?')}
+Additional Benefits: {get_safe('Beyond time savings, what other benefits do you anticipate from this automation?')}
+KPIs: {get_safe('How will you measure the success or effectiveness of this automation? List key performance indicators (KPIs):')}
+Data Readiness: {get_safe('Is the data required for this automation readily available and accessible in a digital format?')}
+Strategic Alignment: {get_safe('How does this proposed automation align with the strategic goals and objectives of your Directorate and the SFDA?')}
+Working Hours: {get_safe('Approximately how many total working hours are spent on this procedure each month?')}
+Employee Count: {get_safe('How many employees currently work on this procedure?')}
+System Count: {get_safe('How many different electronic systems are typically used during this procedure?')}
+Procedure Frequency: {get_safe('How many times is this procedure performed on average each month?')}
 """
 
+        # Use the singleton model instance instead of creating a new one each time
         model = get_model()
+
+        # Generate content with the model
         response = model.generate_content(prompt)
 
         try:
             analysis_text = response.text.strip()
-            if analysis_text.startswith("```markdown"):
-                analysis_text = analysis_text[len("```markdown"):].strip()
-            if analysis_text.endswith("```"):
-                analysis_text = analysis_text[:-len("```")].strip()
         except ValueError:
             print(f"Warning: Gemini response blocked or empty for row {row_index}. Prompt feedback: {response.prompt_feedback}")
             analysis_text = f"Error: The response from the AI model was blocked or empty. Reason: {response.prompt_feedback}"
@@ -298,19 +315,33 @@ How many times is this procedure performed on average each month?: {get_safe('Ho
             "directorate": get_safe('Directorate Submitting the Request'),
             "analysis": analysis_text
         }
-        
-        app.recent_analysis = analysis_text # For chat context, if still used
+
+        # Store the most recent analysis in the app context (deprecated in multi-user approach)
+        # app.recent_analysis = analysis_text # Removed this line as it's not multi-user safe
+
+        # Cache the result for future requests
         analysis_cache[row_index] = result_data
-        
+
         return jsonify(result_data)
 
     except KeyError as e:
         print(f"KeyError accessing data for row {row_index}: {e}")
-        return jsonify({"error": f"Missing expected data column '{e}' in the uploaded CSV for the selected row."}), 400
+        # Check if the missing key was the one we intentionally removed from requirements
+        # If it was, this error means the CSV is missing some OTHER column.
+        # If it wasn't, this error means the CSV is missing one of the columns still required.
+        if str(e) == "'How complex do you anticipate the integration with existing electronic systems will be?'":
+             # This error should ideally not happen now that it's not in required_columns,
+             # but leaving this check just in case the prompt was modified elsewhere.
+             error_message = f"An internal error occurred. The required column '{e}' was not found when generating the AI prompt."
+        else:
+            error_message = f"Missing expected data column {e} in the uploaded CSV for the selected row. Please ensure the CSV contains all required columns."
+
+        return jsonify({"error": error_message}), 400
     except Exception as e:
         print(f"An unexpected error occurred for row {row_index}: {e}")
         traceback.print_exc()
         return jsonify({"error": f"An unexpected error occurred: {e}"}), 500
+
 
 @app.route('/chat', methods=['POST'])
 @timing_decorator
@@ -322,34 +353,32 @@ def chat():
     """
     data = request.get_json()
     user_query = data.get('query', '').strip()
-    frontend_analysis = data.get('analysis', '').strip() # Analysis from frontend
+    frontend_analysis = data.get('analysis', '').strip()
 
     if not user_query:
         return jsonify({"error": "Query cannot be empty."}), 400
 
     try:
-        # Use frontend_analysis if available, otherwise use app.recent_analysis as a fallback
-        # or indicate no analysis is available.
         if frontend_analysis:
-            context = f"The user is asking about the following analysis:\n{frontend_analysis}"
-        elif hasattr(app, 'recent_analysis') and app.recent_analysis:
-             context = f"The user is asking about the following analysis:\n{app.recent_analysis}"
+            context = f"The analysis results are available. Here is the most recent analysis: {frontend_analysis}"
         else:
-            context = "No specific analysis has been performed or provided yet."
+            context = "There are currently no analysis results to explain because no analysis was provided."
 
         prompt = f"""
-        You are an AI assistant helping users understand analysis results related to RPA and AI project proposals at SFDA.
-        Context:
+        You are an AI assistant helping users understand analysis results. Here is the context:
         {context}
 
         User Query: {user_query}
 
-        Provide a clear, concise, and helpful response to the user's query based on the provided analysis context.
-        If the query is general or the context is insufficient, provide a general helpful response.
+        Provide a clear and concise response to the user's query.
         """
 
+        # Use the singleton model instance instead of creating a new one each time
         model = get_model()
+
+        # Generate content with the model
         response = model.generate_content(prompt)
+
         chatbot_response = response.text.strip()
         return jsonify({"response": chatbot_response})
 
@@ -362,20 +391,21 @@ def chat():
 @timing_decorator
 def clear_chat_history():
     """
-    Endpoint to clear the df_global (simulating chat history tied to CSV data).
-    Also clears recent_analysis.
+    Endpoint to clear the chat history state (on the server, though current chat is frontend only).
+    This specific endpoint doesn't affect the frontend LocalStorage history.
+    It currently only clears the global DataFrame, which isn't directly "chat history".
+    Leaving as is for now, but acknowledge its limited effect.
     """
     global df_global
     try:
+        # Clears the uploaded DataFrame, not chat history from LocalStorage.
+        # Frontend clearChatHistory function handles LocalStorage.
         df_global = None
-        if hasattr(app, 'recent_analysis'):
-            app.recent_analysis = None
-        print("Cleared df_global and app.recent_analysis.")
-        return jsonify({"message": "CSV data and recent analysis context cleared successfully."}), 200
+        return jsonify({"message": "Server state (DataFrame) cleared successfully. Frontend chat history remains."}), 200
     except Exception as e:
-        print(f"Error clearing chat history context: {e}")
+        print(f"Error clearing server state: {e}")
         traceback.print_exc()
-        return jsonify({"error": f"Failed to clear chat history context: {e}"}), 500
+        return jsonify({"error": f"Failed to clear server state: {e}"}), 500
 
 @app.route('/analysis/clear', methods=['POST'])
 @timing_decorator
@@ -407,26 +437,30 @@ def send_report():
     data = request.get_json()
     email = data.get('email')
     pdf_base64 = data.get('pdf')
-    
+
     if not email or not pdf_base64:
         return jsonify({"error": "Email and PDF content are required"}), 400
 
     try:
+        # The actual send_email function needs to be implemented in gmail_service.py
+        # Assuming it takes recipient, subject, body, and pdf (base64)
         send_email(
             recipient=email,
             subject="AiPrio Analysis Report",
-            body="Please find attached your AiPrio analysis report.", # Slightly more specific body
+            body="Please find attached your analysis report",
             pdf=pdf_base64
         )
         return jsonify({"message": "PDF report sent successfully"}), 200
     except Exception as e:
         print(f"Error sending email: {e}")
         traceback.print_exc()
+        # More specific error handling might be needed based on send_email implementation
         return jsonify({"error": f"Failed to send email: {e}"}), 500
+
 
 if __name__ == '__main__':
     app.run(
         debug=app.config["FLASK_DEBUG"],
         host=app.config["FLASK_HOST"],
-        port=5000
+        port=5000  # Fixed port for OAuth compatibility
     )
