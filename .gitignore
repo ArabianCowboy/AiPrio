@@ -56,3 +56,5 @@ token.*
 *.swp
 *~
 *.old
+.qodo
+desktop.ini
