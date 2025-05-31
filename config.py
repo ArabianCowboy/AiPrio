@@ -12,6 +12,7 @@ class Config:
     FLASK_DEBUG = True
     FLASK_HOST = "0.0.0.0"
     FLASK_PORT = 5000
+    SECRET_KEY = os.getenv("SECRET_KEY", "a_very_secret_key_for_dev") # Required for Flask sessions
 
     # Google Generative AI
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")

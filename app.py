@@ -1,23 +1,35 @@
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, session
+import os
+import shutil
+import psutil
+import threading
+import time
+from datetime import timedelta, datetime
 from gmail_service import send_email
 from flask_cors import CORS
 import pandas as pd
 import google.generativeai as genai
+from google.generativeai.types import GenerationConfig
+from google.generativeai.generative_models import GenerativeModel
+from google.generativeai.client import configure
 import traceback
 from config import Config
-import time
 import functools
+import uuid
 
 # Configure the Google Generative AI SDK using our centralized config
-genai.configure(api_key=Config.GOOGLE_API_KEY)
+configure(api_key=Config.GOOGLE_API_KEY)
 
 app = Flask(__name__)
 app.config.from_object(Config)
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
 CORS(app)
 
-# Global variables to store data and cache results
-df_global = None
-analysis_cache = {}  # Cache for storing analysis results by row_index
+# Ensure a secret key is set for session management
+if not app.config.get('SECRET_KEY'):
+    app.config['SECRET_KEY'] = os.urandom(24)
+    print("WARNING: SECRET_KEY not set in config.py. Using a temporary, insecure key.")
+
 model_instance = None  # Singleton for the AI model
 
 @app.route('/')
@@ -36,7 +48,6 @@ def upload_csv():
     Endpoint to upload and validate the CSV.
     Expects a form-data field named 'file'.
     """
-    global df_global
 
     if 'file' not in request.files:
         return jsonify({"error": "No file part"}), 400
@@ -47,7 +58,7 @@ def upload_csv():
 
     try:
         # Read CSV (assumes comma-delimited)
-        df = pd.read_csv(file)
+        df = pd.read_csv(file.stream)
         # Clean headers by stripping extra spaces
         df.columns = df.columns.str.strip()
 
@@ -80,12 +91,25 @@ def upload_csv():
             print(f"Upload failed. Missing columns: {missing_cols}")
             return jsonify({"error": f"Missing required columns in CSV: {', '.join(missing_cols)}"}), 400
 
-        # Save DataFrame in global variable
-        df_global = df
+        # Ensure the temporary directory exists
+        temp_dir = os.path.join(app.root_path, 'temp')
+        os.makedirs(temp_dir, exist_ok=True)
+
+        # Generate a unique filename for the CSV
+        unique_filename = f"uploaded_data_{uuid.uuid4()}.csv"
+        temp_file_path = os.path.join(temp_dir, unique_filename)
+
+        # Save the DataFrame to the temporary file
+        df.to_csv(temp_file_path, index=False)
+
+        # Store only the file path in the session
+        session['df_file_path'] = temp_file_path
+        # Initialize or clear analysis cache for the new session
+        session['analysis_cache'] = {}
 
         # Build list of projects (to populate dropdown)
         requests_list = [
-            {"index": idx, "title": row.get('Title of Your Project', f'Row {idx+1} - No Title')}
+            {"index": int(idx), "title": row.get('Title of Your Project', f'Row {int(idx)+1} - No Title')}
             for idx, row in df.iterrows()
         ]
 
@@ -104,15 +128,25 @@ def preview_request(row_index):
     Returns the raw details (all columns) for a single row (selected request)
     with missing values (NaN) replaced by None for valid JSON output.
     """
-    global df_global
-    if df_global is None:
-        return jsonify({"error": "No CSV uploaded or processed yet."}), 400
+    df_file_path = session.get('df_file_path')
+    if df_file_path is None:
+        return jsonify({"error": "No CSV uploaded or processed yet in this session."}), 400
 
-    if row_index < 0 or row_index >= len(df_global):
+    try:
+        df = pd.read_csv(df_file_path)
+    except FileNotFoundError:
+        return jsonify({"error": "Uploaded CSV file not found on server. Please re-upload."}), 404
+    except Exception as e:
+        return jsonify({"error": f"Error reading CSV from file: {e}"}), 500
+
+    if df.empty:
+        return jsonify({"error": "Uploaded data is empty or corrupted."}), 400
+
+    if row_index < 0 or row_index >= len(df):
         return jsonify({"error": "Row index out of range."}), 400
 
     # Retrieve the row as a Series
-    row_series = df_global.iloc[row_index]
+    row_series = df.iloc[row_index]
     # Replace NaN with None (so it serializes to null in JSON)
     row_data = row_series.where(row_series.notna(), None).to_dict()
     return jsonify(row_data)
@@ -134,9 +168,9 @@ def get_model():
     global model_instance
     if model_instance is None:
         print("Initializing new AI model instance")
-        model_instance = genai.GenerativeModel(
+        model_instance = GenerativeModel(
             Config.GENAI_MODEL_NAME,
-            generation_config=genai.types.GenerationConfig(
+            generation_config=GenerationConfig(
                 temperature=0.9,
                 top_p=0.01,
                 top_k=2,
@@ -159,12 +193,23 @@ def prioritize_single(row_index):
     Uses Google Generative AI to produce a Markdown table (with embedded heat map markup) and a conclusion.
     Implements caching to avoid redundant AI calls for the same row.
     """
-    global df_global, analysis_cache
-    if df_global is None:
-        return jsonify({"error": "No CSV uploaded or processed yet."}), 400
-    if not isinstance(df_global, pd.DataFrame):
-        return jsonify({"error": "Uploaded data is not in the expected format."}), 400
-    if row_index < 0 or row_index >= len(df_global):
+    df_file_path = session.get('df_file_path')
+    analysis_cache = session.get('analysis_cache', {})
+
+    if df_file_path is None:
+        return jsonify({"error": "No CSV uploaded or processed yet in this session."}), 400
+
+    try:
+        df = pd.read_csv(df_file_path)
+    except FileNotFoundError:
+        return jsonify({"error": "Uploaded CSV file not found on server. Please re-upload."}), 404
+    except Exception as e:
+        return jsonify({"error": f"Error reading CSV from file: {e}"}), 500
+
+    if df.empty:
+        return jsonify({"error": "Uploaded data is empty or corrupted."}), 400
+
+    if row_index < 0 or row_index >= len(df):
         return jsonify({"error": "Row index out of range."}), 400
 
     # Check if we already have this analysis cached
@@ -174,7 +219,7 @@ def prioritize_single(row_index):
 
     try:
         # Use .loc for better performance with a single row
-        row = df_global.loc[row_index]
+        row = df.loc[row_index]
 
         # Helper function to safely retrieve a column's value.
         def get_safe(key, default="N/A"):
@@ -321,6 +366,7 @@ Procedure Frequency: {get_safe('How many times is this procedure performed on av
 
         # Cache the result for future requests
         analysis_cache[row_index] = result_data
+        session['analysis_cache'] = analysis_cache # Store updated cache back in session
 
         return jsonify(result_data)
 
@@ -396,12 +442,15 @@ def clear_chat_history():
     It currently only clears the global DataFrame, which isn't directly "chat history".
     Leaving as is for now, but acknowledge its limited effect.
     """
-    global df_global
     try:
-        # Clears the uploaded DataFrame, not chat history from LocalStorage.
-        # Frontend clearChatHistory function handles LocalStorage.
-        df_global = None
-        return jsonify({"message": "Server state (DataFrame) cleared successfully. Frontend chat history remains."}), 200
+        # Remove the file from the temporary directory if it exists
+        df_file_path = session.pop('df_file_path', None)
+        if df_file_path and os.path.exists(df_file_path):
+            os.remove(df_file_path)
+            print(f"Removed temporary file: {df_file_path}")
+
+        session.pop('analysis_cache', None)
+        return jsonify({"message": "Session data (CSV file and analysis cache) cleared successfully."}), 200
     except Exception as e:
         print(f"Error clearing server state: {e}")
         traceback.print_exc()
@@ -414,12 +463,10 @@ def clear_analysis_cache():
     Endpoint to clear the analysis cache.
     This allows users to free up memory and force fresh analyses.
     """
-    global analysis_cache
     try:
-        cache_size = len(analysis_cache)
-        analysis_cache.clear()
-        print(f"Cleared analysis cache containing {cache_size} items")
-        return jsonify({"message": f"Analysis cache cleared successfully ({cache_size} items removed)."}), 200
+        # Clear the session-specific analysis cache
+        session['analysis_cache'] = {}
+        return jsonify({"message": "Session analysis cache cleared successfully."}), 200
     except Exception as e:
         print(f"Error clearing analysis cache: {e}")
         traceback.print_exc()
@@ -458,9 +505,96 @@ def send_report():
         return jsonify({"error": f"Failed to send email: {e}"}), 500
 
 
+# Configuration for cleanup and monitoring
+TEMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'temp')
+FILE_CLEANUP_AGE_HOURS = 24
+STORAGE_THRESHOLD_PERCENT = 90
+CLEANUP_INTERVAL_HOURS = 6 # Run cleanup every 6 hours
+STORAGE_CHECK_INTERVAL_HOURS = 1 # Check storage every 1 hour
+
+def cleanup_old_files_and_sessions(priority=False):
+    """
+    Deletes files in the temp/ directory older than FILE_CLEANUP_AGE_HOURS.
+    If priority is True, it might be more aggressive (though not implemented yet).
+    """
+    print(f"[{datetime.now()}] Starting cleanup of old files in {TEMP_DIR} (Priority: {priority})...")
+    if not os.path.exists(TEMP_DIR):
+        print(f"[{datetime.now()}] Temp directory {TEMP_DIR} does not exist. Skipping cleanup.")
+        return
+
+    now = time.time()
+    cutoff_time = now - (FILE_CLEANUP_AGE_HOURS * 3600) # Convert hours to seconds
+
+    deleted_count = 0
+    for filename in os.listdir(TEMP_DIR):
+        file_path = os.path.join(TEMP_DIR, filename)
+        if os.path.isfile(file_path):
+            try:
+                file_age = os.stat(file_path).st_mtime
+                if file_age < cutoff_time:
+                    os.remove(file_path)
+                    deleted_count += 1
+                    print(f"[{datetime.now()}] Deleted old file: {filename}")
+            except Exception as e:
+                print(f"[{datetime.now()}] Error deleting file {filename}: {e}")
+    print(f"[{datetime.now()}] Finished cleanup. Deleted {deleted_count} old files.")
+
+def check_server_storage():
+    """
+    Checks server disk usage and triggers cleanup if a threshold is exceeded.
+    """
+    print(f"[{datetime.now()}] Checking server storage...")
+    try:
+        # Get disk usage for the root partition (or the drive where the app is running)
+        # On Windows, this might be 'C:\\' or similar. psutil handles this cross-platform.
+        disk_usage = psutil.disk_usage('/')
+        percent_used = disk_usage.percent
+        print(f"[{datetime.now()}] Disk usage: {percent_used}%")
+
+        if percent_used > STORAGE_THRESHOLD_PERCENT:
+            print(f"[{datetime.now()}] Disk usage {percent_used}% exceeds threshold {STORAGE_THRESHOLD_PERCENT}%. Triggering priority cleanup.")
+            cleanup_old_files_and_sessions(priority=True)
+        else:
+            print(f"[{datetime.now()}] Disk usage {percent_used}% is within acceptable limits.")
+    except Exception as e:
+        print(f"[{datetime.now()}] Error checking server storage: {e}")
+
+def start_background_tasks():
+    """
+    Starts the periodic background tasks for cleanup and storage monitoring.
+    """
+    # Schedule cleanup task
+    def schedule_cleanup():
+        with app.app_context():
+            cleanup_old_files_and_sessions()
+        # Reschedule itself
+        threading.Timer(CLEANUP_INTERVAL_HOURS * 3600, schedule_cleanup).start()
+
+    # Schedule storage check task
+    def schedule_storage_check():
+        with app.app_context():
+            check_server_storage()
+        # Reschedule itself
+        threading.Timer(STORAGE_CHECK_INTERVAL_HOURS * 3600, schedule_storage_check).start()
+
+    # Start the timers immediately
+    threading.Timer(10, schedule_cleanup).start() # Start cleanup after 10 seconds
+    threading.Timer(5, schedule_storage_check).start() # Start storage check after 5 seconds
+    print(f"[{datetime.now()}] Background cleanup and storage monitoring tasks scheduled.")
+
+
 if __name__ == '__main__':
+    # Create the temp directory if it doesn't exist
+    os.makedirs(TEMP_DIR, exist_ok=True)
+    
+    # Start background tasks in a separate thread
+    # This ensures the main Flask app thread is not blocked
+    background_thread = threading.Thread(target=start_background_tasks)
+    background_thread.daemon = True # Allow the main program to exit even if threads are running
+    background_thread.start()
+
     app.run(
-        debug=app.config["FLASK_DEBUG"],
-        host=app.config["FLASK_HOST"],
+        debug=app.config.get("FLASK_DEBUG", False),
+        host=app.config.get("FLASK_HOST", "127.0.0.1"),
         port=5000  # Fixed port for OAuth compatibility
     )

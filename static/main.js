@@ -2,30 +2,65 @@
 
 // Tab switching functionality
 function openTab(evt, tabName) {
-    // Hide all tab content
     const tabContents = document.getElementsByClassName("tab-content");
-    for (let i = 0; i < tabContents.length; i++) {
-        tabContents[i].classList.remove("active");
-    }
+    const tabLinks = document.getElementsByClassName("tab-link");
+    const newTabContent = document.getElementById(tabName);
 
     // Deactivate all tab links
-    const tabLinks = document.getElementsByClassName("tab-link");
     for (let i = 0; i < tabLinks.length; i++) {
         tabLinks[i].classList.remove("active");
     }
-
-    // Show selected tab and activate link
-    document.getElementById(tabName).classList.add("active");
     evt.currentTarget.classList.add("active");
+
+    // Find the currently active tab content
+    let activeTabContent = null;
+    for (let i = 0; i < tabContents.length; i++) {
+        if (tabContents[i].classList.contains("active")) {
+            activeTabContent = tabContents[i];
+            break;
+        }
+    }
+
+    if (activeTabContent && activeTabContent !== newTabContent) {
+        // Start fade-out for the current active tab
+        activeTabContent.classList.add("fade-out");
+        activeTabContent.classList.remove("fade-in");
+
+        // After fade-out, hide the old tab and show the new one
+        setTimeout(() => {
+            activeTabContent.classList.remove("active", "fade-out");
+            activeTabContent.style.display = "none"; // Ensure old tab is hidden
+
+            newTabContent.style.display = "block"; // Show new tab
+            newTabContent.classList.add("active", "fade-in");
+            newTabContent.classList.remove("fade-out");
+        }, 300); // Delay to match fade-out duration
+    } else if (!activeTabContent || activeTabContent === newTabContent) {
+        // If no active tab (initial load) or clicking the same tab,
+        // ensure all are hidden then show the new one
+        for (let i = 0; i < tabContents.length; i++) {
+            tabContents[i].classList.remove("active", "fade-in", "fade-out");
+            tabContents[i].style.display = "none";
+        }
+        newTabContent.style.display = "block";
+        newTabContent.classList.add("active", "fade-in");
+    }
 }
 
 // Combined DOMContentLoaded handler for all page initialization
 document.addEventListener("DOMContentLoaded", () => {
     // Initialize tabs on about page
     if (document.querySelector('.tab-container')) {
-        // Set Arabic as default active tab
-        document.getElementById('arabic').classList.add('active');
-        document.querySelector('[onclick*="arabic"]').classList.add('active');
+        // Ensure all tab contents are hidden initially
+        const tabContents = document.getElementsByClassName("tab-content");
+        for (let i = 0; i < tabContents.length; i++) {
+            tabContents[i].style.display = "none";
+        }
+        // Set English as default active tab and display it
+        const englishTab = document.getElementById('english');
+        englishTab.classList.add('active');
+        englishTab.style.display = "block";
+        document.querySelector('[onclick*="english"]').classList.add('active');
     }
     // Theme initialization
     const currentTheme = localStorage.getItem("theme") || "light";
@@ -215,9 +250,12 @@ async function uploadCSV() {
         });
   
         setStep(2);
-        // Smooth scroll to the request selection section
-        document.getElementById("requestSelector").style.display = "block";
-        document.getElementById("requestSelector").scrollIntoView({ behavior: "smooth" });
+        // Smooth scroll to the request selection section if it exists
+        const requestSelector = document.getElementById("requestSelector");
+        if (requestSelector) {
+            requestSelector.style.display = "block";
+            requestSelector.scrollIntoView({ behavior: "smooth" });
+        }
         showToast("CSV uploaded successfully", "success");
     } catch (error) {
         showToast(`Upload failed: ${error.message}`, "error");

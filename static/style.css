@@ -20,16 +20,17 @@
   --base-font-size: 14px;
 }
 
-/* Enable Smooth Scroll for in-page anchors */
-html {
-  scroll-behavior: smooth;
-}
 
 /* General Reset */
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+}
+
+/* Smooth scroll behavior for the entire document */
+html {
+  scroll-behavior: smooth;
 }
 
 /* Body Styling */
@@ -40,6 +41,7 @@ body {
   background-color: var(--primary-bg);
   color: var(--primary-text);
   transition: background-color 0.3s, color 0.3s;
+  overflow-y: scroll; /* Ensure scrollbar is always present to prevent layout shifts */
 }
 
 body.dark-mode {
@@ -67,7 +69,7 @@ h3, h4 {
   background: linear-gradient(to right, #D4A373, #CCD5AE);
   padding: 10px 20px;
   border-radius: 5px;
-  margin-bottom: 20px;
+  margin-bottom: 0;
   position: sticky;
   top: 0;
   z-index: 9998;
@@ -271,42 +273,52 @@ body.dark-mode .dark-mode-toggle:hover {
 /* About Container Centering */
 .about-container {
   max-width: 800px;
-  margin: 0 auto;
+  margin: 20px auto; /* Added margin-top for spacing */
   text-align: left;
   padding: 20px;
+  background-color: var(--primary-bg); /* Ensure background for gradient */
+  border-radius: 10px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+body.dark-mode .about-container {
+  background-color: var(--dark-bg);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
 }
 
 /* Table for CSV Preview & Analysis */
 table {
   border-collapse: collapse;
   width: 100%;
-  margin-top: 0.75rem;
-  background-color: #FAEDCD;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+  margin-top: 1rem; /* Increased margin */
+  background-color: var(--chat-bg);
+  box-shadow: 0 4px 10px rgba(0,0,0,0.1); /* Softer shadow */
+  border-radius: 8px; /* Smoother corners for tables */
+  overflow: hidden; /* Ensures border-radius applies */
   page-break-inside: avoid;
 }
 th,
 td {
-  border: 1px solid #ddd;
-  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--secondary-accent); /* Refined border color */
+  padding: 0.6rem 0.8rem; /* Increased padding */
   vertical-align: top;
   text-align: left;
 }
 th {
-  background-color: #CCD5AE;
-  color: #1B263B;
+  background-color: var(--secondary-accent);
+  color: var(--primary-text);
 }
 body.dark-mode table {
-  background-color: #1B263B;
+  background-color: var(--dark-bg);
 }
 body.dark-mode th {
-  background-color: #415A77;
-  color: #E0E1DD;
+  background-color: var(--dark-secondary);
+  color: var(--dark-text);
 }
 body.dark-mode td {
-  background-color: #1B263B;
-  border-color: #415A77;
-  color: #E0E1DD;
+  background-color: var(--dark-bg);
+  border-color: var(--dark-accent);
+  color: var(--dark-text);
 }
 
 /* Heat Map Rating Styles */
@@ -375,14 +387,27 @@ body.dark-mode .rating-very-low {
 .footer-social,
 .footer {
   text-align: center;
-  margin-top: 2rem;
+  margin-top: 3rem; /* Increased margin for better separation */
+  padding: 1rem 0;
+  background-color: var(--primary-bg); /* Ensure background for consistency */
+  border-top: 1px solid var(--secondary-accent);
 }
+
+body.dark-mode .footer-social,
+body.dark-mode .footer {
+  background-color: var(--dark-bg);
+  border-top: 1px solid var(--dark-secondary);
+}
+
 .footer-social p,
 .footer p {
   margin: 0.5rem 0;
+  color: var(--primary-text);
 }
-.footer {
-  padding: 1rem 0;
+
+body.dark-mode .footer-social p,
+body.dark-mode .footer p {
+  color: var(--dark-text);
 }
 
 /* LinkedIn Icon for Footer */
@@ -491,34 +516,135 @@ body.dark-mode .toast {
 /* Tab styles for About page */
 .tab-container {
   display: flex;
-  border-bottom: 2px solid #D4A373;
+  border-bottom: 2px solid var(--primary-accent);
   margin-bottom: 20px;
+  border-radius: 8px; /* Smoother corners */
+  overflow: hidden; /* Ensures border-radius applies to children */
 }
+
+body.dark-mode .tab-container {
+  border-bottom: 2px solid var(--dark-accent);
+}
+
 .tab-link {
   background: none;
   border: none;
-  padding: 10px 20px;
-  font-size: 16px;
+  padding: 12px 25px; /* Increased padding */
+  font-size: 1rem; /* Slightly larger font */
   cursor: pointer;
-  transition: background-color 0.3s;
+  transition: background-color 0.3s ease, color 0.3s ease, transform 0.2s ease;
+  flex-grow: 1; /* Distribute space evenly */
+  text-align: center;
+  border-radius: 5px; /* Smoother corners for buttons */
+  margin: 0 5px; /* Small margin between buttons */
 }
+
+.tab-link:first-child {
+  margin-left: 0;
+}
+
+.tab-link:last-child {
+  margin-right: 0;
+}
+
 .tab-link.active {
-  background-color: #D4A373;
-  color: #1B263B;
+  background-color: var(--primary-accent);
+  color: var(--primary-text);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2); /* Subtle shadow for active tab */
+  transform: translateY(-2px); /* Slight lift */
 }
+
+body.dark-mode .tab-link.active {
+  background-color: var(--dark-accent);
+  color: var(--dark-text);
+}
+
 .tab-link:not(.active):hover {
-  background-color: #CCD5AE;
+  background-color: var(--secondary-accent);
+  color: var(--primary-text);
+  transform: translateY(-1px); /* Subtle hover lift */
 }
+
+body.dark-mode .tab-link:not(.active):hover {
+  background-color: var(--dark-secondary);
+  color: var(--dark-text);
+}
+
 .tab-content {
-  display: none;
+  display: none; /* Hidden by default */
+  opacity: 0;
+  transition: opacity 0.3s ease-in-out; /* Smooth fade transition */
+  pointer-events: none; /* Disable interaction when hidden */
 }
+
 .tab-content.active {
-  display: block;
+  display: block; /* Show when active */
+  opacity: 1;
+  pointer-events: auto; /* Enable interaction when active */
+}
+
+/* Keyframe animations for fade-in and fade-out */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.tab-content.fade-in {
+  animation: fade-in 0.3s forwards;
+}
+
+.tab-content.fade-out {
+  animation: fade-out 0.3s forwards;
 }
 
 /* Arabic text alignment */
 [lang="ar"] {
   text-align: right;
+}
+
+/* Card styles */
+.card {
+  background-color: var(--chat-bg);
+  border-radius: 10px; /* Smoother corners */
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08); /* Softer, more modern depth */
+  padding: 20px; /* Increased padding */
+  margin-bottom: 20px; /* Spacing between cards */
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+body.dark-mode .card {
+  background-color: var(--dark-secondary);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+
+.card:hover {
+  transform: translateY(-5px); /* Subtle lift on hover */
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15); /* Enhanced shadow on hover */
+}
+
+.card h3 {
+  color: var(--primary-accent);
+  margin-top: 0;
+  margin-bottom: 10px;
+  font-size: 1.3rem;
+}
+
+body.dark-mode .card h3 {
+  color: var(--dark-accent);
+}
+
+.card p {
+  color: var(--primary-text);
+  line-height: 1.6;
+}
+
+body.dark-mode .card p {
+  color: var(--dark-text);
 }
 
 /* Chatbot Styles */
@@ -1214,3 +1340,4 @@ body.dark-mode .request-selector button:hover {
     transform: translateY(-4px);
   }
 }
+
