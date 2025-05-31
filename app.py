@@ -1,4 +1,5 @@
-from flask import Flask, request, jsonify, render_template, session
+import logging
+from flask import Flask, request, jsonify, render_template, session, abort
 import os
 import shutil
 import psutil
@@ -16,6 +17,11 @@ import traceback
 from config import Config
 import functools
 import uuid
+import html # Import the html module for sanitization
+
+# Configure logging
+logging.basicConfig(filename='app.log', level=logging.ERROR,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 # Configure the Google Generative AI SDK using our centralized config
 configure(api_key=Config.GOOGLE_API_KEY)
@@ -25,17 +31,28 @@ app.config.from_object(Config)
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
 CORS(app)
 
-# Ensure a secret key is set for session management
-if not app.config.get('SECRET_KEY'):
-    app.config['SECRET_KEY'] = os.urandom(24)
-    print("WARNING: SECRET_KEY not set in config.py. Using a temporary, insecure key.")
-
 model_instance = None  # Singleton for the AI model
+
+# --- Basic Authentication Placeholder ---
+# IMPORTANT: This is a placeholder for demonstration purposes only.
+# For production deployment, this MUST be replaced with a robust authentication system
+# (e.g., Flask-Login, OAuth, JWT, or a proper API key management solution).
+API_KEY = os.environ.get("API_KEY", "your_super_secret_api_key") # Use environment variable in production
+
+def api_key_required(f):
+    @functools.wraps(f)
+    def decorated_function(*args, **kwargs):
+        if request.headers.get('X-API-KEY') and request.headers.get('X-API-KEY') == API_KEY:
+            return f(*args, **kwargs)
+        else:
+            abort(401, description="Unauthorized: Missing or invalid API Key")
+    return decorated_function
 
 @app.route('/')
 def home():
     """Render the main page (index.html)."""
-    return render_template('index.html')
+    # Explicitly pass the module-level API_KEY to the template
+    return render_template('index.html', API_KEY_FROM_BACKEND=API_KEY)
 
 @app.route('/about')
 def about():
@@ -43,6 +60,7 @@ def about():
     return render_template('about.html')
 
 @app.route('/upload', methods=['POST'])
+@api_key_required # Apply authentication to the upload route
 def upload_csv():
     """
     Endpoint to upload and validate the CSV.
@@ -57,6 +75,11 @@ def upload_csv():
         return jsonify({"error": "No selected file"}), 400
 
     try:
+        # Validate file extension
+        if not (file.filename and file.filename.lower().endswith('.csv')):
+            logging.error(f"Attempted upload of non-CSV file or file with no filename: {file.filename}")
+            return jsonify({"error": "Only CSV files are allowed."}), 400
+
         # Read CSV (assumes comma-delimited)
         df = pd.read_csv(file.stream)
         # Clean headers by stripping extra spaces
@@ -91,13 +114,14 @@ def upload_csv():
             print(f"Upload failed. Missing columns: {missing_cols}")
             return jsonify({"error": f"Missing required columns in CSV: {', '.join(missing_cols)}"}), 400
 
-        # Ensure the temporary directory exists
-        temp_dir = os.path.join(app.root_path, 'temp')
-        os.makedirs(temp_dir, exist_ok=True)
+        # Ensure the dedicated uploads directory exists outside the web root
+        # This path is relative to the app.py file
+        upload_folder = os.path.join(app.root_path, 'uploaded_files')
+        os.makedirs(upload_folder, exist_ok=True)
 
         # Generate a unique filename for the CSV
         unique_filename = f"uploaded_data_{uuid.uuid4()}.csv"
-        temp_file_path = os.path.join(temp_dir, unique_filename)
+        temp_file_path = os.path.join(upload_folder, unique_filename)
 
         # Save the DataFrame to the temporary file
         df.to_csv(temp_file_path, index=False)
@@ -109,8 +133,8 @@ def upload_csv():
 
         # Build list of projects (to populate dropdown)
         requests_list = [
-            {"index": int(idx), "title": row.get('Title of Your Project', f'Row {int(idx)+1} - No Title')}
-            for idx, row in df.iterrows()
+            {"index": idx, "title": row.get('Title of Your Project', f'Row {idx+1} - No Title')}
+            for idx, (_, row) in enumerate(df.iterrows())
         ]
 
         return jsonify({"requests": requests_list})
@@ -118,9 +142,8 @@ def upload_csv():
     except pd.errors.EmptyDataError:
         return jsonify({"error": "CSV file is empty."}), 400
     except Exception as e:
-        print(f"Error processing CSV: {e}")
-        traceback.print_exc()
-        return jsonify({"error": f"Error processing CSV file: {e}"}), 500
+        logging.error("Error processing CSV file in /upload route", exc_info=True)
+        return jsonify({"error": "An internal server error occurred during CSV processing."}), 500
 
 @app.route('/preview_request/<int:row_index>', methods=['GET'])
 def preview_request(row_index):
@@ -137,7 +160,8 @@ def preview_request(row_index):
     except FileNotFoundError:
         return jsonify({"error": "Uploaded CSV file not found on server. Please re-upload."}), 404
     except Exception as e:
-        return jsonify({"error": f"Error reading CSV from file: {e}"}), 500
+        logging.error("Error reading CSV from file in /preview_request route", exc_info=True)
+        return jsonify({"error": "An internal server error occurred while reading the CSV file."}), 500
 
     if df.empty:
         return jsonify({"error": "Uploaded data is empty or corrupted."}), 400
@@ -186,6 +210,7 @@ def get_model():
     return model_instance
 
 @app.route('/prioritize/<int:row_index>', methods=['GET'])
+@api_key_required # Apply authentication to the prioritize route
 @timing_decorator
 def prioritize_single(row_index):
     """
@@ -384,9 +409,8 @@ Procedure Frequency: {get_safe('How many times is this procedure performed on av
 
         return jsonify({"error": error_message}), 400
     except Exception as e:
-        print(f"An unexpected error occurred for row {row_index}: {e}")
-        traceback.print_exc()
-        return jsonify({"error": f"An unexpected error occurred: {e}"}), 500
+        logging.error(f"An unexpected error occurred in /prioritize/{row_index} route", exc_info=True)
+        return jsonify({"error": "An internal server error occurred during prioritization."}), 500
 
 
 @app.route('/chat', methods=['POST'])
@@ -398,8 +422,9 @@ def chat():
     Uses the singleton model instance for better performance.
     """
     data = request.get_json()
-    user_query = data.get('query', '').strip()
-    frontend_analysis = data.get('analysis', '').strip()
+    # Sanitize user_query and frontend_analysis
+    user_query = html.escape(data.get('query', '').strip())
+    frontend_analysis = html.escape(data.get('analysis', '').strip())
 
     if not user_query:
         return jsonify({"error": "Query cannot be empty."}), 400
@@ -429,9 +454,8 @@ def chat():
         return jsonify({"response": chatbot_response})
 
     except Exception as e:
-        print(f"Error generating chatbot response: {e}")
-        traceback.print_exc()
-        return jsonify({"error": f"An unexpected error occurred: {e}"}), 500
+        logging.error("Error generating chatbot response in /chat route", exc_info=True)
+        return jsonify({"error": "An internal server error occurred during chat interaction."}), 500
 
 @app.route('/chat/clear', methods=['POST'])
 @timing_decorator
@@ -473,6 +497,7 @@ def clear_analysis_cache():
         return jsonify({"error": f"Failed to clear analysis cache: {e}"}), 500
 
 @app.route('/send-report', methods=['POST'])
+@api_key_required # Apply authentication to the send-report route
 @timing_decorator
 def send_report():
     """
@@ -499,14 +524,13 @@ def send_report():
         )
         return jsonify({"message": "PDF report sent successfully"}), 200
     except Exception as e:
-        print(f"Error sending email: {e}")
-        traceback.print_exc()
-        # More specific error handling might be needed based on send_email implementation
-        return jsonify({"error": f"Failed to send email: {e}"}), 500
+        logging.error("Error sending email in /send-report route", exc_info=True)
+        return jsonify({"error": "An internal server error occurred while sending the report."}), 500
 
 
 # Configuration for cleanup and monitoring
-TEMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'temp')
+# Changed TEMP_DIR to UPLOAD_FOLDER for clarity and to reflect new purpose
+UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploaded_files')
 FILE_CLEANUP_AGE_HOURS = 24
 STORAGE_THRESHOLD_PERCENT = 90
 CLEANUP_INTERVAL_HOURS = 6 # Run cleanup every 6 hours
@@ -514,20 +538,20 @@ STORAGE_CHECK_INTERVAL_HOURS = 1 # Check storage every 1 hour
 
 def cleanup_old_files_and_sessions(priority=False):
     """
-    Deletes files in the temp/ directory older than FILE_CLEANUP_AGE_HOURS.
+    Deletes files in the uploaded_files/ directory older than FILE_CLEANUP_AGE_HOURS.
     If priority is True, it might be more aggressive (though not implemented yet).
     """
-    print(f"[{datetime.now()}] Starting cleanup of old files in {TEMP_DIR} (Priority: {priority})...")
-    if not os.path.exists(TEMP_DIR):
-        print(f"[{datetime.now()}] Temp directory {TEMP_DIR} does not exist. Skipping cleanup.")
+    print(f"[{datetime.now()}] Starting cleanup of old files in {UPLOAD_FOLDER} (Priority: {priority})...")
+    if not os.path.exists(UPLOAD_FOLDER):
+        print(f"[{datetime.now()}] Upload directory {UPLOAD_FOLDER} does not exist. Skipping cleanup.")
         return
 
     now = time.time()
     cutoff_time = now - (FILE_CLEANUP_AGE_HOURS * 3600) # Convert hours to seconds
 
     deleted_count = 0
-    for filename in os.listdir(TEMP_DIR):
-        file_path = os.path.join(TEMP_DIR, filename)
+    for filename in os.listdir(UPLOAD_FOLDER):
+        file_path = os.path.join(UPLOAD_FOLDER, filename)
         if os.path.isfile(file_path):
             try:
                 file_age = os.stat(file_path).st_mtime
@@ -584,8 +608,8 @@ def start_background_tasks():
 
 
 if __name__ == '__main__':
-    # Create the temp directory if it doesn't exist
-    os.makedirs(TEMP_DIR, exist_ok=True)
+    # Create the uploaded_files directory if it doesn't exist
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     
     # Start background tasks in a separate thread
     # This ensures the main Flask app thread is not blocked

@@ -309,14 +309,14 @@ th {
   color: var(--primary-text);
 }
 body.dark-mode table {
-  background-color: var(--dark-bg);
+  background-color: var(--dark-secondary);
 }
 body.dark-mode th {
-  background-color: var(--dark-secondary);
+  background-color: var(--dark-accent);
   color: var(--dark-text);
 }
 body.dark-mode td {
-  background-color: var(--dark-bg);
+  background-color: var(--dark-secondary);
   border-color: var(--dark-accent);
   color: var(--dark-text);
 }
