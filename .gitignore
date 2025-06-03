@@ -49,6 +49,7 @@ token.*
 *.njsproj
 *.sln
 *.sw?
+*_old.py
 
 # Temp files
 *.tmp
