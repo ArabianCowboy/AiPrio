@@ -1,29 +1,58 @@
-from flask import Flask, request, jsonify, render_template
+import logging
+from flask import Flask, request, jsonify, render_template, session, abort
+import os
+import shutil
+import psutil
+import threading
+import time
+from datetime import timedelta, datetime
 from gmail_service import send_email
 from flask_cors import CORS
 import pandas as pd
 import google.generativeai as genai
+from google.generativeai.types import GenerationConfig
+from google.generativeai.generative_models import GenerativeModel
+from google.generativeai.client import configure
 import traceback
 from config import Config
-import time
 import functools
+import uuid
+import html # Import the html module for sanitization
+
+# Configure logging
+logging.basicConfig(filename='app.log', level=logging.ERROR,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 # Configure the Google Generative AI SDK using our centralized config
-genai.configure(api_key=Config.GOOGLE_API_KEY)
+configure(api_key=Config.GOOGLE_API_KEY)
 
 app = Flask(__name__)
 app.config.from_object(Config)
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=1)
 CORS(app)
 
-# Global variables to store data and cache results
-df_global = None
-analysis_cache = {}  # Cache for storing analysis results by row_index
 model_instance = None  # Singleton for the AI model
+
+# --- Basic Authentication Placeholder ---
+# IMPORTANT: This is a placeholder for demonstration purposes only.
+# For production deployment, this MUST be replaced with a robust authentication system
+# (e.g., Flask-Login, OAuth, JWT, or a proper API key management solution).
+API_KEY = os.environ.get("API_KEY", "your_super_secret_api_key") # Use environment variable in production
+
+def api_key_required(f):
+    @functools.wraps(f)
+    def decorated_function(*args, **kwargs):
+        if request.headers.get('X-API-KEY') and request.headers.get('X-API-KEY') == API_KEY:
+            return f(*args, **kwargs)
+        else:
+            abort(401, description="Unauthorized: Missing or invalid API Key")
+    return decorated_function
 
 @app.route('/')
 def home():
     """Render the main page (index.html)."""
-    return render_template('index.html')
+    # Explicitly pass the module-level API_KEY to the template
+    return render_template('index.html', API_KEY_FROM_BACKEND=API_KEY)
 
 @app.route('/about')
 def about():
@@ -31,12 +60,12 @@ def about():
     return render_template('about.html')
 
 @app.route('/upload', methods=['POST'])
+@api_key_required # Apply authentication to the upload route
 def upload_csv():
     """
     Endpoint to upload and validate the CSV.
     Expects a form-data field named 'file'.
     """
-    global df_global
 
     if 'file' not in request.files:
         return jsonify({"error": "No file part"}), 400
@@ -46,8 +75,13 @@ def upload_csv():
         return jsonify({"error": "No selected file"}), 400
 
     try:
+        # Validate file extension
+        if not (file.filename and file.filename.lower().endswith('.csv')):
+            logging.error(f"Attempted upload of non-CSV file or file with no filename: {file.filename}")
+            return jsonify({"error": "Only CSV files are allowed."}), 400
+
         # Read CSV (assumes comma-delimited)
-        df = pd.read_csv(file)
+        df = pd.read_csv(file.stream)
         # Clean headers by stripping extra spaces
         df.columns = df.columns.str.strip()
 
@@ -80,13 +114,27 @@ def upload_csv():
             print(f"Upload failed. Missing columns: {missing_cols}")
             return jsonify({"error": f"Missing required columns in CSV: {', '.join(missing_cols)}"}), 400
 
-        # Save DataFrame in global variable
-        df_global = df
+        # Ensure the dedicated uploads directory exists outside the web root
+        # This path is relative to the app.py file
+        upload_folder = os.path.join(app.root_path, 'uploaded_files')
+        os.makedirs(upload_folder, exist_ok=True)
+
+        # Generate a unique filename for the CSV
+        unique_filename = f"uploaded_data_{uuid.uuid4()}.csv"
+        temp_file_path = os.path.join(upload_folder, unique_filename)
+
+        # Save the DataFrame to the temporary file
+        df.to_csv(temp_file_path, index=False)
+
+        # Store only the file path in the session
+        session['df_file_path'] = temp_file_path
+        # Initialize or clear analysis cache for the new session
+        session['analysis_cache'] = {}
 
         # Build list of projects (to populate dropdown)
         requests_list = [
             {"index": idx, "title": row.get('Title of Your Project', f'Row {idx+1} - No Title')}
-            for idx, row in df.iterrows()
+            for idx, (_, row) in enumerate(df.iterrows())
         ]
 
         return jsonify({"requests": requests_list})
@@ -94,9 +142,8 @@ def upload_csv():
     except pd.errors.EmptyDataError:
         return jsonify({"error": "CSV file is empty."}), 400
     except Exception as e:
-        print(f"Error processing CSV: {e}")
-        traceback.print_exc()
-        return jsonify({"error": f"Error processing CSV file: {e}"}), 500
+        logging.error("Error processing CSV file in /upload route", exc_info=True)
+        return jsonify({"error": "An internal server error occurred during CSV processing."}), 500
 
 @app.route('/preview_request/<int:row_index>', methods=['GET'])
 def preview_request(row_index):
@@ -104,15 +151,26 @@ def preview_request(row_index):
     Returns the raw details (all columns) for a single row (selected request)
     with missing values (NaN) replaced by None for valid JSON output.
     """
-    global df_global
-    if df_global is None:
-        return jsonify({"error": "No CSV uploaded or processed yet."}), 400
+    df_file_path = session.get('df_file_path')
+    if df_file_path is None:
+        return jsonify({"error": "No CSV uploaded or processed yet in this session."}), 400
 
-    if row_index < 0 or row_index >= len(df_global):
+    try:
+        df = pd.read_csv(df_file_path)
+    except FileNotFoundError:
+        return jsonify({"error": "Uploaded CSV file not found on server. Please re-upload."}), 404
+    except Exception as e:
+        logging.error("Error reading CSV from file in /preview_request route", exc_info=True)
+        return jsonify({"error": "An internal server error occurred while reading the CSV file."}), 500
+
+    if df.empty:
+        return jsonify({"error": "Uploaded data is empty or corrupted."}), 400
+
+    if row_index < 0 or row_index >= len(df):
         return jsonify({"error": "Row index out of range."}), 400
 
     # Retrieve the row as a Series
-    row_series = df_global.iloc[row_index]
+    row_series = df.iloc[row_index]
     # Replace NaN with None (so it serializes to null in JSON)
     row_data = row_series.where(row_series.notna(), None).to_dict()
     return jsonify(row_data)
@@ -134,9 +192,9 @@ def get_model():
     global model_instance
     if model_instance is None:
         print("Initializing new AI model instance")
-        model_instance = genai.GenerativeModel(
+        model_instance = GenerativeModel(
             Config.GENAI_MODEL_NAME,
-            generation_config=genai.types.GenerationConfig(
+            generation_config=GenerationConfig(
                 temperature=0.9,
                 top_p=0.01,
                 top_k=2,
@@ -152,6 +210,7 @@ def get_model():
     return model_instance
 
 @app.route('/prioritize/<int:row_index>', methods=['GET'])
+@api_key_required # Apply authentication to the prioritize route
 @timing_decorator
 def prioritize_single(row_index):
     """
@@ -159,12 +218,23 @@ def prioritize_single(row_index):
     Uses Google Generative AI to produce a Markdown table (with embedded heat map markup) and a conclusion.
     Implements caching to avoid redundant AI calls for the same row.
     """
-    global df_global, analysis_cache
-    if df_global is None:
-        return jsonify({"error": "No CSV uploaded or processed yet."}), 400
-    if not isinstance(df_global, pd.DataFrame):
-        return jsonify({"error": "Uploaded data is not in the expected format."}), 400
-    if row_index < 0 or row_index >= len(df_global):
+    df_file_path = session.get('df_file_path')
+    analysis_cache = session.get('analysis_cache', {})
+
+    if df_file_path is None:
+        return jsonify({"error": "No CSV uploaded or processed yet in this session."}), 400
+
+    try:
+        df = pd.read_csv(df_file_path)
+    except FileNotFoundError:
+        return jsonify({"error": "Uploaded CSV file not found on server. Please re-upload."}), 404
+    except Exception as e:
+        return jsonify({"error": f"Error reading CSV from file: {e}"}), 500
+
+    if df.empty:
+        return jsonify({"error": "Uploaded data is empty or corrupted."}), 400
+
+    if row_index < 0 or row_index >= len(df):
         return jsonify({"error": "Row index out of range."}), 400
 
     # Check if we already have this analysis cached
@@ -174,7 +244,7 @@ def prioritize_single(row_index):
 
     try:
         # Use .loc for better performance with a single row
-        row = df_global.loc[row_index]
+        row = df.loc[row_index]
 
         # Helper function to safely retrieve a column's value.
         def get_safe(key, default="N/A"):
@@ -321,6 +391,7 @@ Procedure Frequency: {get_safe('How many times is this procedure performed on av
 
         # Cache the result for future requests
         analysis_cache[row_index] = result_data
+        session['analysis_cache'] = analysis_cache # Store updated cache back in session
 
         return jsonify(result_data)
 
@@ -338,9 +409,8 @@ Procedure Frequency: {get_safe('How many times is this procedure performed on av
 
         return jsonify({"error": error_message}), 400
     except Exception as e:
-        print(f"An unexpected error occurred for row {row_index}: {e}")
-        traceback.print_exc()
-        return jsonify({"error": f"An unexpected error occurred: {e}"}), 500
+        logging.error(f"An unexpected error occurred in /prioritize/{row_index} route", exc_info=True)
+        return jsonify({"error": "An internal server error occurred during prioritization."}), 500
 
 
 @app.route('/chat', methods=['POST'])
@@ -352,8 +422,9 @@ def chat():
     Uses the singleton model instance for better performance.
     """
     data = request.get_json()
-    user_query = data.get('query', '').strip()
-    frontend_analysis = data.get('analysis', '').strip()
+    # Sanitize user_query and frontend_analysis
+    user_query = html.escape(data.get('query', '').strip())
+    frontend_analysis = html.escape(data.get('analysis', '').strip())
 
     if not user_query:
         return jsonify({"error": "Query cannot be empty."}), 400
@@ -383,9 +454,8 @@ def chat():
         return jsonify({"response": chatbot_response})
 
     except Exception as e:
-        print(f"Error generating chatbot response: {e}")
-        traceback.print_exc()
-        return jsonify({"error": f"An unexpected error occurred: {e}"}), 500
+        logging.error("Error generating chatbot response in /chat route", exc_info=True)
+        return jsonify({"error": "An internal server error occurred during chat interaction."}), 500
 
 @app.route('/chat/clear', methods=['POST'])
 @timing_decorator
@@ -396,12 +466,15 @@ def clear_chat_history():
     It currently only clears the global DataFrame, which isn't directly "chat history".
     Leaving as is for now, but acknowledge its limited effect.
     """
-    global df_global
     try:
-        # Clears the uploaded DataFrame, not chat history from LocalStorage.
-        # Frontend clearChatHistory function handles LocalStorage.
-        df_global = None
-        return jsonify({"message": "Server state (DataFrame) cleared successfully. Frontend chat history remains."}), 200
+        # Remove the file from the temporary directory if it exists
+        df_file_path = session.pop('df_file_path', None)
+        if df_file_path and os.path.exists(df_file_path):
+            os.remove(df_file_path)
+            print(f"Removed temporary file: {df_file_path}")
+
+        session.pop('analysis_cache', None)
+        return jsonify({"message": "Session data (CSV file and analysis cache) cleared successfully."}), 200
     except Exception as e:
         print(f"Error clearing server state: {e}")
         traceback.print_exc()
@@ -414,18 +487,17 @@ def clear_analysis_cache():
     Endpoint to clear the analysis cache.
     This allows users to free up memory and force fresh analyses.
     """
-    global analysis_cache
     try:
-        cache_size = len(analysis_cache)
-        analysis_cache.clear()
-        print(f"Cleared analysis cache containing {cache_size} items")
-        return jsonify({"message": f"Analysis cache cleared successfully ({cache_size} items removed)."}), 200
+        # Clear the session-specific analysis cache
+        session['analysis_cache'] = {}
+        return jsonify({"message": "Session analysis cache cleared successfully."}), 200
     except Exception as e:
         print(f"Error clearing analysis cache: {e}")
         traceback.print_exc()
         return jsonify({"error": f"Failed to clear analysis cache: {e}"}), 500
 
 @app.route('/send-report', methods=['POST'])
+@api_key_required # Apply authentication to the send-report route
 @timing_decorator
 def send_report():
     """
@@ -452,15 +524,101 @@ def send_report():
         )
         return jsonify({"message": "PDF report sent successfully"}), 200
     except Exception as e:
-        print(f"Error sending email: {e}")
-        traceback.print_exc()
-        # More specific error handling might be needed based on send_email implementation
-        return jsonify({"error": f"Failed to send email: {e}"}), 500
+        logging.error("Error sending email in /send-report route", exc_info=True)
+        return jsonify({"error": "An internal server error occurred while sending the report."}), 500
+
+
+# Configuration for cleanup and monitoring
+# Changed TEMP_DIR to UPLOAD_FOLDER for clarity and to reflect new purpose
+UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploaded_files')
+FILE_CLEANUP_AGE_HOURS = 24
+STORAGE_THRESHOLD_PERCENT = 90
+CLEANUP_INTERVAL_HOURS = 6 # Run cleanup every 6 hours
+STORAGE_CHECK_INTERVAL_HOURS = 1 # Check storage every 1 hour
+
+def cleanup_old_files_and_sessions(priority=False):
+    """
+    Deletes files in the uploaded_files/ directory older than FILE_CLEANUP_AGE_HOURS.
+    If priority is True, it might be more aggressive (though not implemented yet).
+    """
+    print(f"[{datetime.now()}] Starting cleanup of old files in {UPLOAD_FOLDER} (Priority: {priority})...")
+    if not os.path.exists(UPLOAD_FOLDER):
+        print(f"[{datetime.now()}] Upload directory {UPLOAD_FOLDER} does not exist. Skipping cleanup.")
+        return
+
+    now = time.time()
+    cutoff_time = now - (FILE_CLEANUP_AGE_HOURS * 3600) # Convert hours to seconds
+
+    deleted_count = 0
+    for filename in os.listdir(UPLOAD_FOLDER):
+        file_path = os.path.join(UPLOAD_FOLDER, filename)
+        if os.path.isfile(file_path):
+            try:
+                file_age = os.stat(file_path).st_mtime
+                if file_age < cutoff_time:
+                    os.remove(file_path)
+                    deleted_count += 1
+                    print(f"[{datetime.now()}] Deleted old file: {filename}")
+            except Exception as e:
+                print(f"[{datetime.now()}] Error deleting file {filename}: {e}")
+    print(f"[{datetime.now()}] Finished cleanup. Deleted {deleted_count} old files.")
+
+def check_server_storage():
+    """
+    Checks server disk usage and triggers cleanup if a threshold is exceeded.
+    """
+    print(f"[{datetime.now()}] Checking server storage...")
+    try:
+        # Get disk usage for the root partition (or the drive where the app is running)
+        # On Windows, this might be 'C:\\' or similar. psutil handles this cross-platform.
+        disk_usage = psutil.disk_usage('/')
+        percent_used = disk_usage.percent
+        print(f"[{datetime.now()}] Disk usage: {percent_used}%")
+
+        if percent_used > STORAGE_THRESHOLD_PERCENT:
+            print(f"[{datetime.now()}] Disk usage {percent_used}% exceeds threshold {STORAGE_THRESHOLD_PERCENT}%. Triggering priority cleanup.")
+            cleanup_old_files_and_sessions(priority=True)
+        else:
+            print(f"[{datetime.now()}] Disk usage {percent_used}% is within acceptable limits.")
+    except Exception as e:
+        print(f"[{datetime.now()}] Error checking server storage: {e}")
+
+def start_background_tasks():
+    """
+    Starts the periodic background tasks for cleanup and storage monitoring.
+    """
+    # Schedule cleanup task
+    def schedule_cleanup():
+        with app.app_context():
+            cleanup_old_files_and_sessions()
+        # Reschedule itself
+        threading.Timer(CLEANUP_INTERVAL_HOURS * 3600, schedule_cleanup).start()
+
+    # Schedule storage check task
+    def schedule_storage_check():
+        with app.app_context():
+            check_server_storage()
+        # Reschedule itself
+        threading.Timer(STORAGE_CHECK_INTERVAL_HOURS * 3600, schedule_storage_check).start()
+
+    # Start the timers immediately
+    threading.Timer(10, schedule_cleanup).start() # Start cleanup after 10 seconds
+    threading.Timer(5, schedule_storage_check).start() # Start storage check after 5 seconds
+    print(f"[{datetime.now()}] Background cleanup and storage monitoring tasks scheduled.")
 
 
 if __name__ == '__main__':
+    # Create the uploaded_files directory if it doesn't exist
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    
+    # Start background tasks in a separate thread
+    # This ensures the main Flask app thread is not blocked
+    background_thread = threading.Thread(target=start_background_tasks)
+    background_thread.daemon = True # Allow the main program to exit even if threads are running
+    background_thread.start()
+
     app.run(
-        debug=app.config["FLASK_DEBUG"],
-        host=app.config["FLASK_HOST"],
+        debug=app.config.get("FLASK_DEBUG", False),
+        host=app.config.get("FLASK_HOST", "127.0.0.1"),
         port=5000  # Fixed port for OAuth compatibility
     )
