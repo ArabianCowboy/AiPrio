@@ -1,0 +1,23 @@
+2025-05-31 13:57:14,503 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.100.22:5000
+2025-05-31 13:57:14,503 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-05-31 13:57:18,238 - werkzeug - INFO - 127.0.0.1 - - [31/May/2025 13:57:18] "GET / HTTP/1.1" 200 -
+2025-05-31 13:57:18,286 - werkzeug - INFO - 127.0.0.1 - - [31/May/2025 13:57:18] "GET /static/style.css HTTP/1.1" 200 -
+2025-05-31 13:57:18,287 - werkzeug - INFO - 127.0.0.1 - - [31/May/2025 13:57:18] "GET /static/aiprio_logo.png HTTP/1.1" 200 -
+2025-05-31 13:57:18,299 - werkzeug - INFO - 127.0.0.1 - - [31/May/2025 13:57:18] "GET /static/main.js HTTP/1.1" 200 -
+2025-05-31 13:57:18,339 - werkzeug - INFO - 127.0.0.1 - - [31/May/2025 13:57:18] "GET /static/your-hero-image.png HTTP/1.1" 200 -
+2025-05-31 13:57:20,151 - werkzeug - INFO - 127.0.0.1 - - [31/May/2025 13:57:20] "GET /about HTTP/1.1" 200 -
+2025-05-31 13:57:20,201 - werkzeug - INFO - 127.0.0.1 - - [31/May/2025 13:57:20] "[36mGET /static/style.css HTTP/1.1[0m" 304 -
+2025-05-31 13:57:20,201 - werkzeug - INFO - 127.0.0.1 - - [31/May/2025 13:57:20] "[36mGET /static/aiprio_logo.png HTTP/1.1[0m" 304 -
+2025-05-31 13:57:20,208 - werkzeug - INFO - 127.0.0.1 - - [31/May/2025 13:57:20] "[36mGET /static/main.js HTTP/1.1[0m" 304 -
+2025-05-31 13:57:21,924 - werkzeug - INFO - 127.0.0.1 - - [31/May/2025 13:57:21] "GET / HTTP/1.1" 200 -
+2025-05-31 13:57:21,972 - werkzeug - INFO - 127.0.0.1 - - [31/May/2025 13:57:21] "[36mGET /static/style.css HTTP/1.1[0m" 304 -
+2025-05-31 13:57:21,985 - werkzeug - INFO - 127.0.0.1 - - [31/May/2025 13:57:21] "[36mGET /static/aiprio_logo.png HTTP/1.1[0m" 304 -
+2025-05-31 13:57:21,990 - werkzeug - INFO - 127.0.0.1 - - [31/May/2025 13:57:21] "[36mGET /static/main.js HTTP/1.1[0m" 304 -
+2025-05-31 13:57:22,019 - werkzeug - INFO - 127.0.0.1 - - [31/May/2025 13:57:22] "[36mGET /static/your-hero-image.png HTTP/1.1[0m" 304 -
+2025-05-31 13:57:23,233 - werkzeug - INFO - 127.0.0.1 - - [31/May/2025 13:57:23] "GET /about HTTP/1.1" 200 -
+2025-05-31 13:57:23,274 - werkzeug - INFO - 127.0.0.1 - - [31/May/2025 13:57:23] "[36mGET /static/style.css HTTP/1.1[0m" 304 -
+2025-05-31 13:57:23,284 - werkzeug - INFO - 127.0.0.1 - - [31/May/2025 13:57:23] "[36mGET /static/aiprio_logo.png HTTP/1.1[0m" 304 -
+2025-05-31 13:57:23,289 - werkzeug - INFO - 127.0.0.1 - - [31/May/2025 13:57:23] "[36mGET /static/main.js HTTP/1.1[0m" 304 -
