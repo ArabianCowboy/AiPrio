@@ -18,6 +18,7 @@ from config import Config
 import functools
 import uuid
 import html # Import the html module for sanitization
+import re
 
 # Configure logging
 logging.basicConfig(filename='app.log', level=logging.ERROR,
@@ -209,6 +210,47 @@ def get_model():
         )
     return model_instance
 
+def parse_and_calculate_score(markdown_text):
+    """
+    Parses the AI's markdown response to extract ratings and calculate a weighted score.
+    """
+    WEIGHTS = {
+        "Strategic Alignment": 0.10,
+        "Potential Impact": 0.05,
+        "Complexity & Implementation Difficulty": 0.0,
+        "Urgency & Necessity": 0.025,
+        "Risk & Challenges": 0.025,
+        "Hours Spent each month": 0.35,
+        "Number of Employees": 0.40,
+        "Number of Systems": 0.025,
+        "Stakeholders Impacted": 0.025
+    }
+    
+    total_score = 0.0
+    
+    # New, more robust regex to handle markdown table structure, including bolded category names.
+    # It specifically looks for the category name inside asterisks and extracts the percentage from the third column.
+    pattern = re.compile(
+        r"\|\s*\*\*(?P<category>[\w\s&]+?)\*\*\s*\|"  # 1. Category: Captures text between `| **` and `** |`
+        r".*?\|"                                     # 2. Rating: Non-greedy match for the second column
+        r"\s*(?P<percentage>\d+)%\s*\|",              # 3. Rating %: Captures the digits before a '%' in the third column
+        re.MULTILINE
+    )
+
+    matches = pattern.finditer(markdown_text)
+    
+    for match in matches:
+        category = match.group("category").strip()
+        percentage = int(match.group("percentage"))
+        
+        if category in WEIGHTS:
+            weighted_value = (percentage / 100.0) * WEIGHTS[category]
+            total_score += weighted_value
+
+    # Return the final score as a percentage, rounded to two decimal places
+    final_score = round(total_score * 100, 2)
+    return final_score
+
 @app.route('/prioritize/<int:row_index>', methods=['GET'])
 @api_key_required # Apply authentication to the prioritize route
 @timing_decorator
@@ -259,7 +301,7 @@ As a pharmacist within the Saudi Food and Drug Authority (SFDA), consider the im
 
 Please produce your analysis as follows:
 
-1. A single **Markdown table** with columns: **Category**, **Rating**,, **Rating %** and **Justification**.
+1. A single **Markdown table** with columns: **Category**, **Rating**, **Rating %**, and **Justification**.
     For the **Rating** column, please use one of the following values: "Very High", "High", "Medium", "Low", or "Very Low".
     For the **Rating %** column, use the following values objuctively based on the rating:
     - For 'Very High', select a specific percentage between 90% and 100% (e.g., 95%).
@@ -330,9 +372,6 @@ Please produce your analysis as follows:
  • 8+ => Very High
 Provide 3+ sentences explaining who is involved, potential collaboration, or cross-department benefits. for example more department get benfit from th AI or RPA the greater the the impact of reducing workload .
 
-    **10. Overall Priority**
-    Synthesize the above points in at least 7 sentences, with explicit quantitative references.
-
 **PART 2: Conclusion**
 Immediately after the table, include a 4–5 sentence concluding paragraph under the exact Markdown heading `## Conclusion`.
 This paragraph must summarize key takeaways from the analysis and recommend next steps (e.g., pilot testing, further data validation, stakeholder consultation).
@@ -375,6 +414,24 @@ Procedure Frequency: {get_safe('How many times is this procedure performed on av
 
         try:
             analysis_text = response.text.strip()
+            # Calculate the weighted score from the AI's analysis
+            calculated_score = parse_and_calculate_score(analysis_text)
+            
+            # Format the new table row for the overall score
+            overall_priority_row = f"\n| **Overall Priority** | | **{calculated_score}%** | A weighted score calculated based on all factors. |"
+
+            # Inject the new row before the "## Conclusion" heading
+            conclusion_heading = "## Conclusion"
+            if conclusion_heading in analysis_text:
+                parts = analysis_text.split(conclusion_heading, 1)
+                table_part = parts[0].rstrip()
+                conclusion_part = parts[1]
+                # Ensure proper spacing for Markdown rendering
+                analysis_text = table_part + overall_priority_row + "\n\n" + conclusion_heading + conclusion_part
+            else:
+                # Fallback in case the conclusion heading is missing
+                analysis_text += overall_priority_row
+            
         except ValueError:
             print(f"Warning: Gemini response blocked or empty for row {row_index}. Prompt feedback: {response.prompt_feedback}")
             analysis_text = f"Error: The response from the AI model was blocked or empty. Reason: {response.prompt_feedback}"
